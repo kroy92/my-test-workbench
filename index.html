@@ -1,0 +1,3510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Design Workbench</title>
+    
+    <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
+    <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" onerror="window.libError('PDF.js')"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js" onerror="window.libError('SheetJS')"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js" onerror="window.libError('Mammoth')"></script>
+    
+    <script>
+        if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        window.libError = (lib) => alert(`CRITICAL: Failed to load ${lib}. Check internet connection.`);
+    </script>
+
+    <style>
+        :root { 
+            --sidebar-width: 220px;
+            --sidebar-bg: #252423;
+            --sidebar-text: #f3f2f1;
+            --d365-header: #000000; 
+            --d365-bg: #f3f2f1; 
+            --d365-card: #ffffff; 
+            --d365-primary: #0078d4; 
+            --d365-text: #201f1e;
+            --d365-border: #8a8886;
+            --terminal-bg: #1e1e1e;
+            --btn-green: #107c10;
+            --btn-red: #a80000;
+            --toast-bg: #ffffff;
+        }
+
+        body { 
+            font-family: 'Segoe UI', 'Segoe UI Web (West European)', -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif; 
+            background-color: var(--d365-bg); 
+            color: var(--d365-text); 
+            margin: 0; padding: 0; 
+            height: 100vh;
+            display: flex; flex-direction: column; overflow: hidden;
+        }
+
+        /* --- TOAST NOTIFICATIONS --- */
+        #toast-container { position: fixed; top: 60px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 10px; }
+        
+        .toast {
+            background: var(--toast-bg); color: #333; padding: 12px 16px; border-radius: 4px; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15); border-left: 5px solid #ccc;
+            min-width: 300px; max-width: 400px; font-size: 13px; animation: slideInToast 0.3s ease-out;
+            display: flex; justify-content: space-between; align-items: flex-start;
+        }
+        .toast.success { border-left-color: var(--btn-green); }
+        .toast.error { border-left-color: var(--btn-red); }
+        .toast.warn { border-left-color: #ffb900; }
+        .toast.info { border-left-color: var(--d365-primary); }
+        
+        @keyframes slideInToast { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes fadeOutToast { to { opacity: 0; transform: translateX(10px); } }
+
+        /* --- LAYOUT --- */
+        .app-container { display: flex; flex: 1; overflow: hidden; }
+        
+        /* SIDEBAR */
+        .sidebar {
+            width: var(--sidebar-width); background: var(--sidebar-bg); color: var(--sidebar-text);
+            display: flex; flex-direction: column; padding-top: 10px; flex-shrink: 0; transition: width 0.2s ease;
+        }
+        .sidebar.collapsed { width: 50px; }
+        .sidebar.collapsed .nav-item span:not(.nav-icon) { display: none; }
+        .sidebar.collapsed .nav-item { justify-content: center; padding: 12px 0; }
+        .sidebar-toggle {
+            padding: 8px 20px; cursor: pointer; display: flex; align-items: center; gap: 10px;
+            color: #888; font-size: 12px; border-bottom: 1px solid #3b3a39; margin-bottom: 10px;
+        }
+        .sidebar-toggle:hover { color: #fff; }
+        .sidebar.collapsed .sidebar-toggle { justify-content: center; padding: 8px 0; }
+        .sidebar.collapsed .sidebar-toggle span { display: none; }
+        .sidebar.collapsed .sidebar-toggle .expand-icon { display: inline-block; }
+        .sidebar-toggle .expand-icon { display: none; font-size: 18px; }
+        .sidebar.collapsed .sidebar-toggle { background: rgba(255,255,255,0.1); margin: 0 5px; border-radius: 4px; }
+        .sidebar.collapsed .sidebar-toggle:hover { background: var(--d365-primary); }
+        .nav-item {
+            padding: 12px 20px; cursor: pointer; display: flex; align-items: center; gap: 10px;
+            border-left: 4px solid transparent; transition: 0.2s; font-size: 14px;
+        }
+        .nav-item:hover { background: #3b3a39; }
+        .nav-item.active { background: #3b3a39; border-left-color: var(--d365-primary); font-weight: 600; }
+        .nav-icon { font-size: 16px; }
+
+        /* MAIN CONTENT */
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #f8f9fa; }
+        .view-section { display: none; height: 100%; flex-direction: column; overflow: hidden; box-sizing: border-box; }
+        .view-section.active { display: flex; }
+        .view-section-scroll { flex: 1; overflow-y: auto; padding: 20px 30px; }
+
+        /* --- TOP BAR --- */
+        .d365-top-bar {
+            background-color: var(--d365-header); color: white; height: 48px;
+            display: flex; align-items: center; padding: 0 16px; font-size: 16px; font-weight: 600; flex-shrink: 0; z-index: 1000;
+        }
+
+        /* --- COMPONENTS --- */
+        .action-pane {
+            background: white; border-bottom: 1px solid #ccc; padding: 4px 10px; display: flex; gap: 5px; align-items: center;
+            flex-shrink: 0; position: sticky; top: 0; z-index: 100;
+        }
+        .action-btn {
+            background: transparent; border: none; display: flex; flex-direction: column; align-items: center; justify-content: center;
+            padding: 6px 12px; cursor: pointer; color: #333; font-size: 13px; font-weight: 500; border-radius: 2px;
+        }
+        .action-btn:hover { background-color: #edebe9; }
+        .action-btn:disabled { color: #a19f9d; cursor: default; }
+        .action-btn.danger:hover { background-color: #fde7e9; color: var(--btn-red); }
+
+        /* GROUPED TABLE VIEW (D365 Style) */
+        .tc-table-container { margin-top: 10px; padding-bottom: 20px; }
+        
+        /* TC SECTION WRAPPER */
+        .tc-section-wrapper { background: white; border: 1px solid #0078d4; border-radius: 4px; margin-bottom: 20px; overflow: hidden; display: none; }
+        .tc-section-wrapper.has-items { display: block; }
+        .tc-section-header {
+            background: linear-gradient(to right, #005a9e, #004578); color: white; padding: 10px 15px;
+            display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none;
+        }
+        .tc-section-header:hover { background: linear-gradient(to right, #004578, #003366); }
+        .tc-section-title { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 10px; }
+        .tc-section-toggle { font-size: 12px; transition: transform 0.2s; }
+        .tc-section-wrapper.collapsed .tc-section-toggle { transform: rotate(-90deg); }
+        .tc-section-wrapper.collapsed .tc-section-body { display: none; }
+        .tc-section-body { padding: 15px; }
+        .tc-section-count { font-size: 12px; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 10px; }
+        .tc-section-actions { display: flex; gap: 8px; }
+        .tc-section-btn { background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); color: white; padding: 4px 10px; border-radius: 3px; cursor: pointer; font-size: 12px; }
+        .tc-section-btn:hover { background: rgba(255,255,255,0.3); }
+        
+        /* CONTEXT SECTION WRAPPER */
+        .context-section-wrapper { background: white; border: 1px solid #107c10; border-radius: 4px; margin-bottom: 15px; overflow: hidden; }
+        .context-section-header {
+            background: linear-gradient(to right, #107c10, #0b5c0b); color: white; padding: 10px 15px;
+            display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none;
+        }
+        .context-section-header:hover { background: linear-gradient(to right, #0b5c0b, #094509); }
+        .context-section-title { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 10px; }
+        .context-section-toggle { font-size: 12px; transition: transform 0.2s; }
+        .context-section-wrapper.collapsed .context-section-toggle { transform: rotate(-90deg); }
+        .context-section-wrapper.collapsed .context-section-body { display: none; }
+        .context-section-body { padding: 15px; }
+        .context-section-count { font-size: 12px; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 10px; }
+        .context-section-actions { display: flex; gap: 8px; }
+        .context-section-btn { background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); color: white; padding: 4px 10px; border-radius: 3px; cursor: pointer; font-size: 12px; }
+        .context-section-btn:hover { background: rgba(255,255,255,0.3); }
+        
+        /* SETTINGS COLLAPSIBLE SECTIONS */
+        .settings-section { background: white; border: 1px solid #8a8886; border-radius: 4px; margin-bottom: 15px; overflow: hidden; }
+        .settings-section-header {
+            background: #f3f2f1; padding: 10px 15px; display: flex; justify-content: space-between; align-items: center;
+            cursor: pointer; user-select: none; border-bottom: 1px solid #e1dfdd;
+        }
+        .settings-section-header:hover { background: #edebe9; }
+        .settings-section-title { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 10px; color: #323130; }
+        .settings-section-toggle { font-size: 12px; transition: transform 0.2s; color: #605e5c; }
+        .settings-section.collapsed .settings-section-toggle { transform: rotate(-90deg); }
+        .settings-section.collapsed .settings-section-body { display: none; }
+        .settings-section.collapsed .settings-section-header { border-bottom: none; }
+        .settings-section-body { padding: 15px; }
+        
+        .tc-group { background: white; border: 1px solid #d2d0ce; margin-bottom: 15px; border-radius: 4px; overflow: hidden; }
+        .tc-group:last-child { margin-bottom: 0; }
+        .tc-group-header { 
+            background: linear-gradient(to right, #0078d4, #106ebe); color: white; padding: 10px 15px; 
+            display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none;
+        }
+        .tc-group-header:hover { background: linear-gradient(to right, #106ebe, #005a9e); }
+        .tc-group-header.other { background: linear-gradient(to right, #8a8886, #605e5c); }
+        .tc-group-header.other:hover { background: linear-gradient(to right, #605e5c, #484644); }
+        .tc-group-title { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 10px; }
+        .tc-group-toggle { font-size: 12px; transition: transform 0.2s; }
+        .tc-group.collapsed .tc-group-toggle { transform: rotate(-90deg); }
+        .tc-group.collapsed .tc-group-body { display: none; }
+        .tc-group-count { font-size: 12px; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 10px; }
+        .tc-group-btn { background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); color: white; padding: 3px 10px; border-radius: 3px; cursor: pointer; font-size: 12px; font-weight: 500; }
+        .tc-group-btn:hover { background: rgba(255,255,255,0.3); }
+        .tc-group-check { transform: scale(1.3); cursor: pointer; margin-right: 8px; accent-color: white; }
+        
+        .tc-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+        .tc-table th { background: #f3f2f1; padding: 8px 12px; text-align: left; font-size: 11px; font-weight: 600; color: #605e5c; text-transform: uppercase; border-bottom: 1px solid #d2d0ce; }
+        .tc-table td { padding: 10px 12px; border-bottom: 1px solid #edebe9; font-size: 13px; vertical-align: middle; overflow: hidden; }
+        .tc-table tr:hover { background: #f8fcfd; }
+        .tc-table tr.selected { background: #eff6fc; }
+        .tc-table tr.pushed { background: #e6ffec; }
+        .tc-table tr:last-child td { border-bottom: none; }
+        
+        .tc-row-title { font-weight: 500; color: #201f1e; cursor: pointer; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .tc-row-title:hover { color: #0078d4; text-decoration: underline; }
+        .tc-row-steps { color: #605e5c; text-align: center; }
+        .tc-row-conf { text-align: center; }
+        .tc-row-status { text-align: center; }
+        .tc-row-actions { text-align: center; white-space: nowrap; }
+        .tc-row-actions button { background: none; border: none; cursor: pointer; padding: 4px 6px; font-size: 14px; opacity: 0.7; }
+        .tc-row-actions button:hover { opacity: 1; background: #edebe9; border-radius: 2px; }
+        
+        .tc-check { transform: scale(1.2); cursor: pointer; }
+        .status-badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 600; white-space: nowrap; }
+        .status-badge.linked { background: #dff6dd; color: #107c10; }
+        .status-badge.unlinked { background: #fff4ce; color: #8a6d00; }
+        .status-badge.ai { background: #e8f4fd; color: #0078d4; }
+        .status-badge.manual { background: #f3f2f1; color: #605e5c; }
+
+        /* REVIEW CARD - COLLAPSIBLE */
+        .story-review-card {
+            background: white; border: 1px solid #8661c5; border-radius: 4px; margin-bottom: 10px; overflow: hidden;
+        }
+        .story-review-card.unselected { opacity: 0.5; border-color: #ccc; }
+        .story-review-card.unselected .story-card-header { background: linear-gradient(to right, #a0a0a0, #888); }
+        .story-card-header {
+            background: linear-gradient(to right, #9b7dcf, #7c5cbb); color: white; padding: 8px 12px;
+            display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none;
+        }
+        .story-card-header:hover { background: linear-gradient(to right, #7c5cbb, #6b4faa); }
+        .story-card-title { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+        .story-card-toggle { font-size: 11px; transition: transform 0.2s; }
+        .story-review-card.collapsed .story-card-toggle { transform: rotate(-90deg); }
+        .story-review-card.collapsed .story-card-body { display: none; }
+        .story-card-body { padding: 12px; }
+        .editable-box {
+            background: #fff; border: 1px solid #ccc; padding: 8px; margin-top: 4px; margin-bottom: 10px;
+            min-height: 60px; max-height: 300px; overflow-y: auto; font-size: 13px;
+        }
+        .editable-box.refined { border: 2px solid #f0c000; background: #fffef5; }
+        
+        /* Refine/Undo buttons */
+        .story-card-actions { display: flex; gap: 6px; align-items: center; margin-top: 10px; }
+        .btn-refine { background: linear-gradient(to right, #f0c000, #d4a800); color: #1a1a1a; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; }
+        .btn-refine:hover { background: linear-gradient(to right, #d4a800, #b89500); }
+        .btn-refine:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-undo { background: #f3f2f1; color: #333; border: 1px solid #ccc; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; display: none; }
+        .btn-undo:hover { background: #e5e5e5; }
+        .btn-undo.visible { display: inline-block; }
+        
+        /* Story view toggle in modal */
+        .story-view-toggle { display: flex; gap: 4px; margin-bottom: 12px; }
+        .story-view-btn { padding: 4px 10px; font-size: 11px; border: 1px solid #ccc; background: #f9f9f9; cursor: pointer; border-radius: 3px; }
+        .story-view-btn.active { background: #0078d4; color: white; border-color: #0078d4; }
+        .story-view-btn:hover:not(.active) { background: #e5e5e5; }
+        .original-indicator { font-size: 10px; color: #a80000; font-weight: 600; margin-left: 8px; display: none; }
+        .original-indicator.visible { display: inline; }
+        
+        /* Story card view toggle */
+        .card-view-toggle { display: none; margin-bottom: 10px; gap: 4px; align-items: center; }
+        .card-view-toggle.visible { display: flex; }
+        .card-view-btn { padding: 3px 8px; font-size: 10px; border: 1px solid #ccc; background: #f9f9f9; cursor: pointer; border-radius: 3px; }
+        .card-view-btn.active { background: #6b4c9a; color: white; border-color: #6b4c9a; }
+        .card-view-btn:hover:not(.active) { background: #e5e5e5; }
+        
+        /* COLLAPSIBLE REVIEW SECTION - PURPLE THEME */
+        .review-section-wrapper { background: white; border: 1px solid #6b4faa; border-radius: 4px; margin-bottom: 20px; overflow: hidden; }
+        .review-section-header {
+            background: linear-gradient(to right, #6b4faa, #553d8a); color: white; padding: 10px 15px;
+            display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none;
+        }
+        .review-section-header:hover { background: linear-gradient(to right, #553d8a, #45326e); }
+        .review-section-title { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 10px; }
+        .review-section-toggle { font-size: 12px; transition: transform 0.2s; }
+        .review-section-wrapper.collapsed .review-section-toggle { transform: rotate(-90deg); }
+        .review-section-wrapper.collapsed .review-section-body { display: none; }
+        .review-section-body { padding: 15px; }
+        .review-section-count { font-size: 12px; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 10px; }
+        .review-section-actions { display: flex; gap: 8px; align-items: center; }
+        .review-section-btn { background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 4px 10px; border-radius: 3px; cursor: pointer; font-size: 12px; font-weight: 500; }
+        .review-section-btn:hover { background: rgba(255,255,255,0.3); }
+        .review-story-check { transform: scale(1.3); cursor: pointer; margin-right: 10px; accent-color: #7c5cbb; }
+
+        /* SETTINGS & INPUTS */
+        label { font-size: 12px; font-weight: 600; color: #444; margin-bottom: 4px; display: block; }
+        input[type="text"], input[type="password"], textarea, select {
+            width: 100%; padding: 6px 8px; border: 1px solid #8a8886; border-radius: 2px;
+            font-family: 'Segoe UI'; font-size: 14px; outline: none; box-sizing: border-box;
+        }
+        input.error-field { border-color: var(--btn-red); background-color: #fff5f5; }
+        .config-group { background: white; padding: 20px; margin-bottom: 20px; border: 1px solid #e0e0e0; border-radius: 4px; }
+        
+        /* MANUAL UPLOAD ZONE */
+        .upload-zone {
+            border: 2px dashed #0078d4; background: #f3f9fd; padding: 40px; text-align: center; border-radius: 4px; margin-bottom: 20px; cursor: pointer; transition: 0.2s;
+        }
+        .upload-zone:hover { background: #e1f0fa; }
+        
+        /* MODAL */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 7000; display: none; justify-content: flex-end; }
+        .modal-overlay.active { display: flex; }
+        .modal-box { 
+            background: white; width: 95vw; max-width: 1600px; height: 100%; box-shadow: -5px 0 20px rgba(0,0,0,0.2); 
+            display: flex; flex-direction: column; animation: slideIn 0.3s;
+        }
+        @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+        .modal-header { height: 50px; border-bottom: 1px solid #edebe9; display: flex; align-items: center; padding: 0 20px; justify-content: space-between; flex-shrink: 0;}
+        .modal-body-split { flex: 1; display: flex; overflow: hidden; background: #fff; }
+        .modal-left-pane { flex: 6; padding: 25px; overflow-y: auto; border-right: 1px solid #edebe9; }
+        .modal-right-pane { flex: 4; padding: 25px; overflow-y: auto; background: #faf9f8; }
+
+        .ref-header { font-size: 11px; font-weight: 700; color: #605e5c; text-transform: uppercase; margin-top: 20px; margin-bottom: 8px; display:block; }
+        .ref-header:first-child { margin-top: 0; }
+        .ref-content { font-size: 13px; color: #201f1e; line-height: 1.5; margin-bottom: 20px; }
+        .ref-content img { max-width: 100%; border: 1px solid #ccc; margin-top: 5px; }
+
+        /* BUTTONS */
+        .btn-primary-action { background-color: var(--btn-green); color: white; border: none; padding: 8px 16px; font-weight: 600; border-radius: 2px; cursor: pointer; }
+        .btn-primary-action:hover { background-color: #0b5a0b; }
+        .btn-secondary { background-color: #f3f2f1; color: #323130; border: 1px solid #8a8886; padding: 6px 12px; font-weight: 500; border-radius: 2px; cursor: pointer; font-size: 12px; }
+        .btn-secondary:hover { background-color: #edebe9; border-color: #323130; }
+        .btn-cancel { background-color: #a4262c; color: white; border: none; padding: 8px 16px; font-weight: 600; border-radius: 2px; cursor: pointer; margin-right: 10px; }
+
+        /* CONFIDENCE BADGE */
+        .confidence-badge { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 10px; }
+        .confidence-high { background: #dff6dd; color: #107c10; }
+        .confidence-medium { background: #fff4ce; color: #8a6d00; }
+        .confidence-low { background: #fde7e9; color: #a80000; }
+        .tc-confidence { position: absolute; bottom: 10px; right: 10px; font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 8px; }
+
+        /* LINK STATUS */
+        .link-status-badge { font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; }
+        .link-status-badge.linked { background: #dff6dd; color: #107c10; }
+        .link-status-badge.unlinked { background: #fff4ce; color: #8a6d00; }
+        .modal-link-controls { display: flex; align-items: center; gap: 10px; }
+        .modal-link-input { width: 100px; padding: 4px 8px; font-size: 12px; }
+        .ai-mode-indicator { font-size: 10px; padding: 3px 8px; border-radius: 10px; font-weight: 600; }
+        .ai-mode-editor { background: #e8f4fd; color: #0078d4; }
+        .ai-mode-validator { background: #dff6dd; color: #107c10; }
+        .ref-placeholder { color: #a19f9d; font-style: italic; padding: 20px; text-align: center; background: #faf9f8; border: 1px dashed #d2d0ce; border-radius: 4px; }
+
+        /* CONSOLE */
+        #virtual-shell { 
+            flex-shrink: 0; background: var(--terminal-bg); color: #ccc; border-top: 1px solid #333; 
+            z-index: 6000; height: 180px; transition: height 0.2s ease;
+            font-family: 'Consolas', monospace; font-size: 12px; display: flex; flex-direction: column;
+            width: 100%; position: relative;
+        }
+        #virtual-shell.minimized { height: 32px; }
+        #shell-header { background: #333; padding: 6px 15px; cursor: pointer; user-select: none; display: flex; justify-content: space-between; }
+        #log-output { padding: 10px; overflow-y: auto; flex-grow: 1; }
+        
+        table { width: 100%; border-collapse: collapse; font-size: 13px; background: white; table-layout: fixed;}
+        th, td { border-bottom: 1px solid #edebe9; padding: 8px 10px; vertical-align: top; text-align: left; }
+        th { background: #faf9f8; font-weight: 600; }
+    </style>
+</head>
+<body>
+
+    <div id="toast-container"></div>
+
+    <div class="d365-top-bar">
+        <span style="margin-right:15px; font-size:18px;">⋮⋮⋮</span>
+        <span>Azure DevOps | <strong>Test Design Workbench</strong></span>
+    </div>
+
+    <div class="app-container">
+        
+        <div class="sidebar" id="main-sidebar">
+            <div class="sidebar-toggle" onclick="toggleSidebar()" title="Expand / Collapse Sidebar">
+                <span class="nav-icon">☰</span> <span>Collapse</span>
+                <span class="expand-icon">»</span>
+            </div>
+            <div class="nav-item active" onclick="switchView('ai')" title="Generate test cases using AI from user stories">
+                <span class="nav-icon">✨</span> <span>AI Test Design</span>
+            </div>
+            <div class="nav-item" onclick="switchView('manual')" title="Upload test cases from CSV file">
+                <span class="nav-icon">📤</span> <span>Upload Manually</span>
+            </div>
+            <div class="nav-item" onclick="switchView('settings')" title="Configure ADO connection, AI provider, and system settings">
+                <span class="nav-icon">⚙️</span> <span>Settings</span>
+            </div>
+        </div>
+
+        <div class="main-content">
+            
+            <div id="view-ai" class="view-section active">
+                <div class="action-pane">
+                    <button class="action-btn" id="btn-fetch-edit" onclick="window.py_fetch_review()" title="Fetch user stories from Azure DevOps for review and editing">🔍 Fetch & Edit</button>
+                    <button class="action-btn" id="btn-generate" onclick="window.py_generate()" title="💰 Generate test cases using AI (uses API credits)">⚡ Generate</button>
+                    
+                    <div style="flex:1;"></div>
+                    <span id="file-count-label" style="font-size:12px; color:#666;">No context</span>
+                </div>
+
+                <div class="view-section-scroll">
+                <div style="background:white; padding:15px; margin-bottom:15px; border:1px solid #ccc; border-radius:4px;">
+                    <label>User Story IDs (Comma Separated)</label>
+                    <input type="text" id="story_ids" placeholder="e.g. 1024, 1025">
+                </div>
+                
+                <!-- CONTEXT SECTION -->
+                <div id="context-section" class="context-section-wrapper">
+                    <div class="context-section-header" onclick="toggleContextSection()">
+                        <div class="context-section-title">
+                            <span class="context-section-toggle">▼</span>
+                            <span>📁 Reference Context</span>
+                            <span class="context-section-count" id="context-count-badge">0 items</span>
+                        </div>
+                        <div class="context-section-actions" onclick="event.stopPropagation()">
+                            <button class="context-section-btn" onclick="document.getElementById('file-input').click()" title="Attach files (PDF, DOCX, XLSX, TXT) as reference context for AI">📎 Attach</button>
+                            <input type="file" id="file-input" multiple style="display:none" onchange="processFiles(event)">
+                            <button class="context-section-btn" onclick="document.getElementById('context-input').click()" title="Load previously saved context files (.txt, .md)">📂 Load</button>
+                            <input type="file" id="context-input" multiple accept=".txt,.md" style="display:none" onchange="loadSavedContext(event)">
+                            <button class="context-section-btn" onclick="saveContextToFile()" title="Save all active context to a file for later use">💾 Save</button>
+                            <button class="context-section-btn" onclick="clearContext()" title="Remove all context items">🗑️ Clear</button>
+                        </div>
+                    </div>
+                    <div class="context-section-body">
+                        <div id="file-list" style="font-size:12px; min-height:30px;"></div>
+                        <div id="context-empty-msg" style="color:#666; font-size:12px;">No context loaded. Use buttons above to attach files or load saved context.</div>
+                    </div>
+                </div>
+
+                <div id="story-review-section" class="review-section-wrapper collapsed" style="display:none;">
+                    <div class="review-section-header" onclick="toggleReviewSection()">
+                        <div class="review-section-title">
+                            <span class="review-section-toggle">▼</span>
+                            <span>📝 Review & Edit Stories</span>
+                            <span class="review-section-count" id="review-count-badge">0 stories</span>
+                        </div>
+                        <div class="review-section-actions" onclick="event.stopPropagation()">
+                            <button class="review-section-btn" onclick="toggleAllReviewChecks(true)" title="Select all stories for generation">☑ All</button>
+                            <button class="review-section-btn" onclick="toggleAllReviewChecks(false)" title="Deselect all stories">☐ None</button>
+                            <button class="review-section-btn" onclick="clearReviewSection()" title="Clear all fetched stories" style="color:#ffcccc;">✕ Clear</button>
+                            <button class="btn-primary-action" id="btn-gen-review" onclick="window.py_generate_from_review()" title="💰 Generate test cases for selected stories (uses API credits)">🚀 Generate Selected</button>
+                        </div>
+                    </div>
+                    <div class="review-section-body">
+                        <div id="story-review-grid"></div>
+                    </div>
+                </div>
+
+                <div id="ai-tc-section" class="tc-section-wrapper">
+                    <div class="tc-section-header" onclick="toggleTCSection('ai-tc-section')">
+                        <div class="tc-section-title">
+                            <span class="tc-section-toggle">▼</span>
+                            <span>🧪 Generated Test Cases</span>
+                            <span class="tc-section-count" id="ai-tc-count-badge">0 items</span>
+                        </div>
+                        <div class="tc-section-actions" onclick="event.stopPropagation()">
+                            <button class="tc-section-btn" onclick="toggleAllChecks('ai-grid')" title="Select/deselect all test cases">☑ All</button>
+                            <button class="tc-section-btn" onclick="bulkPushAction('ai-grid')" title="Push selected test cases to Azure DevOps">🚀 Push</button>
+                            <button class="tc-section-btn" onclick="bulkDownloadCSV('ai-grid')" title="Download selected test cases as CSV file">⬇ CSV</button>
+                            <button class="tc-section-btn" onclick="deleteSelected('ai-grid')" style="color:#a80000;" title="Delete selected test cases">🗑️ Del</button>
+                            <button class="tc-section-btn" onclick="clearGrid('ai-grid')" style="color:#a80000;" title="Remove all generated test cases">✕ Clear</button>
+                        </div>
+                    </div>
+                    <div class="tc-section-body">
+                        <div id="ai-grid" class="tc-table-container"></div>
+                    </div>
+                </div>
+                </div> <!-- close view-section-scroll -->
+            </div> <!-- close view-ai -->
+
+            <div id="view-manual" class="view-section">
+                <div class="action-pane">
+                    <button class="action-btn" onclick="document.getElementById('manual-csv-input').click()" title="Upload a CSV file with test cases (Story ID, Name, Action, Expected Result)">📄 Upload CSV</button>
+                    <input type="file" id="manual-csv-input" accept=".csv" style="display:none" onchange="window.py_parse_manual_csv(this)">
+                </div>
+
+                <div class="view-section-scroll">
+                <div style="background:white; padding:15px; margin-bottom:15px; border:1px solid #ccc; border-radius:4px;">
+                    <label>Manual Upload</label>
+                    <p style="font-size:13px; color:#666; margin:5px 0 0 0;">Upload a CSV with 4 columns: <strong>Story ID, Name, Action, Expected Result</strong>. The format must match the AI export exactly.</p>
+                </div>
+                
+                <div class="upload-zone" onclick="document.getElementById('manual-csv-input').click()" title="Click to select a CSV file with test cases to upload">
+                    <span style="font-size:24px;">📄</span><br>
+                    <strong>Click to Upload CSV</strong>
+                </div>
+
+                <div id="manual-tc-section" class="tc-section-wrapper">
+                    <div class="tc-section-header" onclick="toggleTCSection('manual-tc-section')">
+                        <div class="tc-section-title">
+                            <span class="tc-section-toggle">▼</span>
+                            <span>📋 Uploaded Test Cases</span>
+                            <span class="tc-section-count" id="manual-tc-count-badge">0 items</span>
+                        </div>
+                        <div class="tc-section-actions" onclick="event.stopPropagation()">
+                            <button class="tc-section-btn" onclick="toggleAllChecks('manual-grid')" title="Select/deselect all test cases">☑ All</button>
+                            <button class="tc-section-btn" onclick="bulkPushAction('manual-grid')" title="Push selected test cases to Azure DevOps">🚀 Push</button>
+                            <button class="tc-section-btn" onclick="bulkDownloadCSV('manual-grid')" title="Download selected test cases as CSV file">⬇ CSV</button>
+                            <button class="tc-section-btn" onclick="deleteSelected('manual-grid')" style="color:#a80000;" title="Delete selected test cases">🗑️ Del</button>
+                            <button class="tc-section-btn" onclick="clearGrid('manual-grid')" style="color:#a80000;" title="Remove all uploaded test cases">✕ Clear</button>
+                        </div>
+                    </div>
+                    <div class="tc-section-body">
+                        <div id="manual-grid" class="tc-table-container"></div>
+                    </div>
+                </div>
+                </div>
+            </div>
+
+            <div id="view-settings" class="view-section">
+                <div class="view-section-scroll">
+                <h2>System Settings</h2>
+                
+                <!-- ADO Connection Section -->
+                <div id="settings-ado" class="settings-section">
+                    <div class="settings-section-header" onclick="toggleSettingsSection('settings-ado')">
+                        <div class="settings-section-title">
+                            <span class="settings-section-toggle">▼</span>
+                            <span>🔗 Azure DevOps Connection</span>
+                        </div>
+                    </div>
+                    <div class="settings-section-body">
+                        <label>Org URL *</label><input type="text" id="ado_url" class="required">
+                        <div style="margin-top:10px;"></div>
+                        <label>Project *</label><input type="text" id="ado_project" class="required">
+                        <div style="margin-top:10px;"></div>
+                        <label>PAT Token *</label><input type="password" id="ado_pat" class="required">
+                    </div>
+                </div>
+                
+                <!-- AI Provider Section -->
+                <div id="settings-ai" class="settings-section">
+                    <div class="settings-section-header" onclick="toggleSettingsSection('settings-ai')">
+                        <div class="settings-section-title">
+                            <span class="settings-section-toggle">▼</span>
+                            <span>🤖 AI Provider</span>
+                        </div>
+                    </div>
+                    <div class="settings-section-body">
+                        <label>Provider *</label>
+                        <select id="ai_provider" onchange="toggleAIProvider()" style="padding:6px 8px; border:1px solid #8a8886; border-radius:2px; width:100%;">
+                            <option value="azure">Azure OpenAI</option>
+                            <option value="openai">OpenAI Chat Completions</option>
+                            <option value="responses">OpenAI Responses API</option>
+                        </select>
+                    
+                    <!-- Azure OpenAI Fields -->
+                    <div id="azure-fields" style="margin-top:15px;">
+                        <label>Endpoint *</label><input type="text" id="ai_endpoint" class="required" placeholder="https://your-resource.openai.azure.com">
+                        <div style="margin-top:10px;"></div>
+                        <label>API Key *</label><input type="password" id="ai_key" class="required">
+                        <div style="margin-top:10px;"></div>
+                        <label>Deployment *</label><input type="text" id="ai_deployment" class="required" placeholder="gpt-4o">
+                        <div style="margin-top:10px;"></div>
+                        <label>API Version</label><input type="text" id="ai_version" value="2024-08-01-preview">
+                    </div>
+                    
+                    <!-- OpenAI Chat Completions Fields -->
+                    <div id="openai-fields" style="margin-top:15px; display:none;">
+                        <label>Base URL *</label>
+                        <input type="text" id="openai_base_url" class="required" value="https://api.openai.com/v1" placeholder="https://api.openai.com/v1">
+                        <p style="font-size:11px; color:#666; margin:4px 0 10px 0;">For Azure SDK mode: https://your-resource.openai.azure.com/openai/v1</p>
+                        <label>API Key *</label><input type="password" id="openai_key" class="required" placeholder="sk-... or Azure API key">
+                        <div style="margin-top:10px;"></div>
+                        <label>Model *</label>
+                        <input type="text" id="openai_model" class="required" placeholder="gpt-4o or deployment name">
+                    </div>
+                    
+                    <!-- OpenAI Responses API Fields -->
+                    <div id="responses-fields" style="margin-top:15px; display:none;">
+                        <label>Base URL *</label>
+                        <input type="text" id="responses_base_url" class="required" value="https://api.openai.com/v1" placeholder="https://api.openai.com/v1">
+                        <p style="font-size:11px; color:#666; margin:4px 0 10px 0;">Default: https://api.openai.com/v1</p>
+                        <label>API Key *</label><input type="password" id="responses_key" class="required" placeholder="sk-...">
+                        <div style="margin-top:10px;"></div>
+                        <label>Model *</label>
+                        <input type="text" id="responses_model" class="required" value="gpt-4o" placeholder="gpt-4o, gpt-4.1, o3, gpt-5">
+                        <p style="font-size:11px; color:#666; margin:4px 0 0 0;">OpenAI's newest API. Supports gpt-4o, gpt-4.1, o3, o4-mini, gpt-5, etc.</p>
+                    </div>
+                    </div> <!-- close settings-section-body for settings-ai -->
+                </div> <!-- close settings-ai -->
+                
+                <!-- Document Parsing Section -->
+                <div id="settings-parsing" class="settings-section">
+                    <div class="settings-section-header" onclick="toggleSettingsSection('settings-parsing')">
+                        <div class="settings-section-title">
+                            <span class="settings-section-toggle">▼</span>
+                            <span>📄 Document Parsing</span>
+                        </div>
+                    </div>
+                    <div class="settings-section-body">
+                        <label>Parsing Mode</label>
+                        <select id="parsing_mode" onchange="toggleDocIntelFields()" style="padding:6px 8px; border:1px solid #8a8886; border-radius:2px; width:100%;">
+                            <option value="local">🖥️ Local (Free/Fast - PDF.js, SheetJS)</option>
+                            <option value="azure">☁️ Azure Cloud (Smart/Accurate - Document Intelligence)</option>
+                        </select>
+                        <p style="font-size:11px; color:#666; margin:4px 0 10px 0;">Local: Fast, free, good for simple docs. Azure: OCR, scanned PDFs, complex tables.</p>
+                        
+                        <!-- Azure Document Intelligence Fields -->
+                        <div id="docintel-fields" style="margin-top:10px; display:none; padding:12px; background:#f0f8ff; border:1px solid #0078d4; border-radius:4px;">
+                            <label>Doc Intelligence Endpoint *</label>
+                            <input type="text" id="docintel_endpoint" class="required" placeholder="https://your-resource.cognitiveservices.azure.com">
+                            <div style="margin-top:10px;"></div>
+                            <label>Doc Intelligence Key *</label>
+                            <input type="password" id="docintel_key" class="required" placeholder="Your Azure Document Intelligence API key">
+                            <p style="font-size:11px; color:#666; margin:4px 0 0 0;">Uses prebuilt-read model. Ensure CORS is enabled on Azure resource.</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- System Instructions Section -->
+                <div id="settings-prompt" class="settings-section">
+                    <div class="settings-section-header" onclick="toggleSettingsSection('settings-prompt')">
+                        <div class="settings-section-title">
+                            <span class="settings-section-toggle">▼</span>
+                            <span>📝 System Instructions</span>
+                        </div>
+                        <div style="display:flex; gap:8px;" onclick="event.stopPropagation()">
+                            <button class="btn-secondary" onclick="window.py_export_prompt_md()" title="Export system instructions to a Markdown file">📥 Export</button>
+                            <button class="btn-secondary" onclick="document.getElementById('prompt-md-input').click()" title="Import system instructions from a Markdown file">📤 Import</button>
+                            <input type="file" id="prompt-md-input" accept=".md" style="display:none" onchange="window.py_import_prompt_md(this)">
+                            <button class="btn-secondary" onclick="window.py_reset_instruction()" title="Reset to default system instructions">↺ Reset</button>
+                        </div>
+                    </div>
+                    <div class="settings-section-body">
+                        <textarea id="sys_instruction" style="height:150px;"></textarea>
+                    </div>
+                </div>
+                
+                <!-- Import/Export Section -->
+                <div id="settings-export" class="settings-section">
+                    <div class="settings-section-header" onclick="toggleSettingsSection('settings-export')">
+                        <div class="settings-section-title">
+                            <span class="settings-section-toggle">▼</span>
+                            <span>💾 Import / Export Configuration</span>
+                        </div>
+                        <div style="display:flex; gap:8px;" onclick="event.stopPropagation()">
+                            <button class="btn-secondary" onclick="window.py_export_config_json()" title="Export all settings (ADO, AI) to a JSON file">📥 Export JSON</button>
+                            <button class="btn-secondary" onclick="document.getElementById('config-json-input').click()" title="Import settings from a JSON file">📤 Import JSON</button>
+                            <input type="file" id="config-json-input" accept=".json" style="display:none" onchange="window.py_import_config_json(this)">
+                        </div>
+                    </div>
+                    <div class="settings-section-body">
+                        <p style="font-size:12px; color:#666; margin:0;">Save or load your ADO and AI settings as a JSON file (excludes system prompt).</p>
+                    </div>
+                </div>
+                
+                <button class="btn-primary-action" onclick="window.py_save_config()" style="margin-top:10px;" title="Save all settings to browser local storage">💾 Save All Settings</button>
+                </div> <!-- close view-section-scroll -->
+            </div> <!-- close view-settings -->
+
+        </div> <!-- close main-content -->
+    </div> <!-- close app-container -->
+
+    <div id="virtual-shell" class="minimized">
+        <div id="shell-header" onclick="document.getElementById('virtual-shell').classList.toggle('minimized')" title="Click to expand/collapse console output">
+            <span>Console Output (Verbose)</span>
+            <span>▼</span>
+        </div>
+        <div id="log-output">
+            <div style="color:#6a9955">> System Ready. (v20 Custom)</div>
+        </div>
+    </div>
+
+    <div id="modal-overlay" class="modal-overlay">
+        <div class="modal-box">
+            <div class="modal-header">
+                <div style="display:flex; align-items:center; gap:15px;">
+                    <span style="font-weight:600; color:#0078d4;">Edit Test Case</span>
+                    <span id="modal-confidence" class="confidence-badge"></span>
+                    <!-- AI Mode Indicator -->
+                    <span id="ai-mode-badge" class="ai-mode-indicator ai-mode-editor">✏️ Editor Mode</span>
+                </div>
+                <div>
+                    <button class="action-btn" style="display:inline-block;" id="btn-modal-csv" onclick="singleDownloadCSV(this.dataset.uid)" title="Download this test case as CSV file">⬇ CSV</button>
+                    <button class="btn-cancel" onclick="closeModal()" title="Close without saving changes">Cancel</button>
+                    <button class="btn-primary-action" id="btn-modal-save" onclick="window.py_save_draft(this.dataset.uid)" title="Save changes locally (not to ADO)">💾 Save Draft</button>
+                    <button class="btn-primary-action" id="btn-modal-push" onclick="window.py_push_modal(this.dataset.uid)" title="Push this test case to Azure DevOps">Push to ADO 🚀</button>
+                </div>
+            </div>
+            <div class="modal-body-split">
+                <div class="modal-left-pane">
+                    <label>TITLE</label><input type="text" id="modal-title" style="margin-bottom:20px; font-weight:600;">
+                    
+                    <div style="background:#f0f8ff; border:1px solid #0078d4; border-radius:4px; padding:10px; margin-bottom:15px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <label style="margin:0; color:#0078d4;">🔄 Quick Fix</label>
+                            <button class="btn-secondary" id="btn-modal-regen" onclick="window.py_regenerate_tc(this.dataset.uid)" title="💰 Regenerate test case with your instructions (uses API credits)">Apply Fix</button>
+                        </div>
+                        <input type="text" id="regen-hint" placeholder="e.g. Fix typo in step 2, make step 3 clearer, add expected result for step 4..." title="Enter instructions for how to fix or improve this test case">
+                    </div>
+                    
+                    <label>STEPS</label>
+                    <table style="border:1px solid #ccc;">
+                        <thead><tr><th width="40%">Action</th><th width="40%">Result</th><th width="20%">Edit</th></tr></thead>
+                        <tbody id="modal-steps-body"></tbody>
+                    </table>
+                </div>
+                <div class="modal-right-pane">
+                    <!-- Link Controls Header -->
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; padding-bottom:10px; border-bottom:1px solid #edebe9;">
+                        <span class="ref-header" style="margin:0;">User Story Reference</span>
+                        
+                        <!-- Link Controls: Unlinked State -->
+                        <div id="modal-link-unlinked" class="modal-link-controls">
+                            <input type="text" id="modal-link-story-id" class="modal-link-input" placeholder="Story ID" style="width:80px;" title="Enter a User Story ID from Azure DevOps">
+                            <button class="btn-secondary" onclick="window.py_fetch_and_link_story()" id="btn-modal-fetch-link" style="padding:4px 10px;" title="Fetch story from ADO and link it to this test case">🔗 Fetch</button>
+                        </div>
+                        
+                        <!-- Link Controls: Linked State -->
+                        <div id="modal-link-linked" class="modal-link-controls" style="display:none;">
+                            <span class="link-status-badge linked" id="modal-linked-story-label">Linked: #123</span>
+                            <button class="btn-secondary" onclick="window.py_unlink_story()" style="color:#a80000; padding:4px 10px;" title="Remove link to user story (test case remains)">✕ Unlink</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Placeholder for unlinked state -->
+                    <div id="ref-placeholder" class="ref-placeholder" style="display:none;">
+                        <div style="font-size: 32px; margin-bottom: 10px;">📋</div>
+                        <div style="font-weight: 600; margin-bottom: 5px;">No Story Linked</div>
+                        <div style="font-size: 12px;">Enter a Story ID and click "Fetch" to link a User Story for context.</div>
+                    </div>
+                    
+                    <!-- Story content (shown when linked) -->
+                    <div id="ref-content-container">
+                        <div id="story-title-display" style="font-size:15px; font-weight:600; color:#0078d4; margin-bottom:10px;"></div>
+                        
+                        <div class="story-view-toggle" id="story-view-toggle" style="display:none;">
+                            <button class="story-view-btn active" id="btn-view-generated" onclick="toggleStoryView('generated')" title="View AI-refined version of the story">📝 Refined</button>
+                            <button class="story-view-btn" id="btn-view-original" onclick="toggleStoryView('original')" title="View original story from Azure DevOps">📋 Original</button>
+                            <span class="original-indicator" id="original-indicator">Viewing Original</span>
+                        </div>
+                        
+                        <button class="btn-secondary" id="btn-refetch-original" onclick="window.py_refetch_original_story()" style="font-size:11px; padding:4px 8px; margin-bottom:10px; display:none;" title="Fetch latest version of this story from Azure DevOps">🔄 Re-fetch from ADO</button>
+                        
+                        <span class="ref-header">Description</span>
+                        <div id="story-desc-display" class="ref-content"></div>
+                        
+                        <span class="ref-header">Acceptance Criteria</span>
+                        <div id="story-ac-display" class="ref-content"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    // --- TOAST NOTIFICATIONS ---
+    window.notify = function(message, type = 'info') {
+        const container = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        
+        let icon = 'ℹ️';
+        if(type==='success') icon = '✅';
+        if(type==='error') icon = '❌';
+        if(type==='warn') icon = '⚠️';
+
+        toast.innerHTML = `
+            <div style="display:flex; align-items:flex-start; gap:10px;">
+                <span>${icon}</span>
+                <span style="flex:1;">${message}</span>
+            </div>
+            <button onclick="this.parentElement.remove()" style="background:none; border:none; cursor:pointer; color:#666;">✕</button>
+        `;
+        
+        container.appendChild(toast);
+        
+        // Also log to console for persistence
+        window.writeLog(message, type);
+
+        // Auto remove
+        setTimeout(() => {
+            toast.style.animation = "fadeOutToast 0.5s forwards";
+            setTimeout(() => toast.remove(), 500);
+        }, 4000);
+    }
+
+    // --- LOGGING ---
+    window.writeLog = function(msg, type='info') {
+        const out = document.getElementById("log-output");
+        const time = new Date().toLocaleTimeString();
+        let color = '#ccc';
+        if (type === 'error') color = '#ff6b6b';
+        if (type === 'success') color = '#69f0ae';
+        if (type === 'debug') color = '#569cd6'; 
+        
+        out.innerHTML += `<div><span style="color:#808080">[${time}]</span> <span style="color:${color}">${msg}</span></div>`;
+        out.scrollTop = out.scrollHeight;
+    }
+
+    // --- NAVIGATION ---
+    function switchView(viewName) {
+        document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.nav-item:not(.sidebar-toggle)').forEach(el => el.classList.remove('active'));
+        
+        document.getElementById('view-' + viewName).classList.add('active');
+        const idx = viewName === 'ai' ? 0 : viewName === 'manual' ? 1 : 2;
+        document.querySelectorAll('.nav-item:not(.sidebar-toggle)')[idx].classList.add('active');
+    }
+    
+    function toggleSidebar() {
+        document.getElementById('main-sidebar').classList.toggle('collapsed');
+    }
+    
+    // --- AI PROVIDER TOGGLE ---
+    function toggleAIProvider() {
+        const provider = document.getElementById('ai_provider').value;
+        const azureFields = document.getElementById('azure-fields');
+        const openaiFields = document.getElementById('openai-fields');
+        const responsesFields = document.getElementById('responses-fields');
+        
+        // Hide all first
+        azureFields.style.display = 'none';
+        openaiFields.style.display = 'none';
+        responsesFields.style.display = 'none';
+        
+        // Show selected provider's fields
+        if (provider === 'azure') {
+            azureFields.style.display = 'block';
+        } else if (provider === 'openai') {
+            openaiFields.style.display = 'block';
+        } else if (provider === 'responses') {
+            responsesFields.style.display = 'block';
+        }
+    }
+    
+    // Initialize provider toggle on page load
+    // Toggle Document Intelligence fields visibility
+    function toggleDocIntelFields() {
+        const mode = document.getElementById('parsing_mode').value;
+        document.getElementById('docintel-fields').style.display = mode === 'azure' ? 'block' : 'none';
+    }
+    
+    document.addEventListener('DOMContentLoaded', function() {
+        setTimeout(toggleAIProvider, 100);
+        setTimeout(toggleDocIntelFields, 100);
+    });
+
+    // --- FILE ATTACHMENT ---
+    window.UPLOADED_CONTEXT = { text: "", images: [], items: [] };
+    async function processFiles(e) {
+        const files = e.target.files;
+        if(files.length === 0) return;
+        
+        const countLbl = document.getElementById('file-count-label');
+        const parsingMode = document.getElementById('parsing_mode').value;
+        
+        // Initialize items array if not exists
+        if (!window.UPLOADED_CONTEXT.items) {
+            window.UPLOADED_CONTEXT.items = [];
+        }
+        
+        window.notify(`Processing ${files.length} attachment(s) using ${parsingMode === 'azure' ? 'Azure Cloud' : 'Local'} parsing...`, "info");
+        
+        for (let file of files) {
+            let status = "...";
+            let txt = "";
+            let fileType = "";
+            let isImage = false;
+            
+            try {
+                // Check if Azure parsing should be used for documents
+                const useAzure = parsingMode === 'azure' && 
+                    (file.type === 'application/pdf' || 
+                     file.name.endsWith('.xlsx') || 
+                     file.name.endsWith('.docx') ||
+                     file.type.startsWith('image/'));
+                
+                if (useAzure) {
+                    // Use Azure Document Intelligence for all supported types
+                    if (file.type.startsWith('image/')) {
+                        txt = await extractWithAzureDocIntel(file);
+                        const b64 = await toBase64(file);
+                        window.UPLOADED_CONTEXT.images.push(b64);
+                        fileType = "Image OCR";
+                        isImage = true;
+                        status = "Image+OCR (Azure)";
+                    } else {
+                        txt = await extractWithAzureDocIntel(file);
+                        fileType = file.type === 'application/pdf' ? 'PDF' : 
+                                  file.name.endsWith('.xlsx') ? 'Excel' : 'DOCX';
+                        status = `${fileType} (Azure)`;
+                    }
+                } else if (file.type === "application/pdf") {
+                    if(typeof pdfjsLib === 'undefined') throw new Error("PDF Library missing");
+                    txt = await extractPDF(file);
+                    fileType = "PDF";
+                    status = "PDF Loaded";
+                } else if (file.name.endsWith(".xlsx")) {
+                    if(typeof XLSX === 'undefined') throw new Error("Excel Library missing");
+                    txt = await extractExcel(file);
+                    fileType = "Excel";
+                    status = "Excel Loaded";
+                } else if (file.name.endsWith(".docx")) {
+                    if(typeof mammoth === 'undefined') throw new Error("Word Library missing");
+                    txt = await extractDocx(file);
+                    fileType = "DOCX";
+                    status = "Word Loaded";
+                } else if (file.type.startsWith("image/")) {
+                    const b64 = await toBase64(file);
+                    window.UPLOADED_CONTEXT.images.push(b64);
+                    isImage = true;
+                    fileType = "Image";
+                    status = "Image Loaded";
+                }
+                
+                // Add to items array if we have text content
+                if (txt) {
+                    const itemId = 'ctx_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+                    window.UPLOADED_CONTEXT.items.push({
+                        id: itemId,
+                        name: file.name,
+                        type: fileType,
+                        content: txt,
+                        enabled: true
+                    });
+                    
+                    // Create toggleable row with save button
+                    let d = document.createElement("div");
+                    d.className = "context-item";
+                    d.id = `ctx-row-${itemId}`;
+                    d.style.cssText = "display:flex; align-items:center; gap:8px; padding:4px 0;";
+                    d.innerHTML = `
+                        <input type="checkbox" checked onchange="toggleContextItem('${itemId}', this)" style="cursor:pointer;">
+                        <span style="color:#0078d4; flex:1;">📎 ${file.name} (${status})</span>
+                        <button onclick="saveIndividualContext('${itemId}')" style="background:#f3f2f1; border:1px solid #8a8886; border-radius:3px; padding:2px 6px; cursor:pointer; font-size:11px;" title="Save this context">💾</button>
+                    `;
+                    document.getElementById('file-list').appendChild(d);
+                } else if (isImage && !txt) {
+                    // Image without OCR - just display (no toggle since no text)
+                    let d = document.createElement("div");
+                    d.style.cssText = "padding:2px 0; padding-left:24px; color:#666;";
+                    d.innerText = `🖼️ ${file.name} (${status})`;
+                    document.getElementById('file-list').appendChild(d);
+                }
+                
+            } catch(err) { 
+                status = "Error"; 
+                window.notify(`Failed to load ${file.name}: ${err.message}`, "error");
+                console.error('File processing error:', err);
+                let d = document.createElement("div");
+                d.style.cssText = "padding:2px 0; color:#a80000;";
+                d.innerText = `❌ ${file.name} (Error)`;
+                document.getElementById('file-list').appendChild(d);
+            }
+        }
+        
+        // Rebuild context from items
+        buildActiveContext();
+        updateContextBadge();
+        
+        // Hide empty message
+        document.getElementById('context-empty-msg').style.display = 'none';
+        
+        // Add completion summary in file list
+        const summary = document.createElement("div");
+        summary.style.cssText = "margin-top:8px; padding:6px 10px; background:#d4edda; color:#155724; border-radius:4px; font-size:12px; font-weight:500;";
+        summary.innerText = `✅ Ready! ${files.length} file(s) processed${parsingMode === 'azure' ? ' via Azure Cloud' : ''} - Use checkboxes to toggle`;
+        document.getElementById('file-list').appendChild(summary);
+        
+        // Reset file input so same file can be selected again
+        e.target.value = '';
+    }
+    
+    function clearContext() { 
+        window.UPLOADED_CONTEXT = {text:"", images:[], items: []}; 
+        document.getElementById('file-list').innerHTML = "";
+        updateContextBadge();
+        document.getElementById('context-empty-msg').style.display = 'block';
+        window.notify("Attachment context cleared.", "warn");
+    }
+    
+    // --- BUILD ACTIVE CONTEXT ---
+    // Builds the actual context text from all enabled items
+    function buildActiveContext() {
+        let text = "";
+        const items = window.UPLOADED_CONTEXT.items || [];
+        for (const item of items) {
+            if (item.enabled) {
+                text += `\n[${item.type}: ${item.name}]\n${item.content}`;
+            }
+        }
+        window.UPLOADED_CONTEXT.text = text;
+    }
+    
+    // Toggle a context item on/off
+    function toggleContextItem(itemId, checkbox) {
+        const items = window.UPLOADED_CONTEXT.items || [];
+        const item = items.find(i => i.id === itemId);
+        if (item) {
+            item.enabled = checkbox.checked;
+            buildActiveContext();
+            
+            // Update visual style
+            const row = checkbox.closest('.context-item');
+            if (row) {
+                row.style.opacity = checkbox.checked ? '1' : '0.5';
+                row.style.textDecoration = checkbox.checked ? 'none' : 'line-through';
+            }
+            
+            // Update count
+            const enabledCount = items.filter(i => i.enabled).length;
+            document.getElementById('file-count-label').innerText = `${enabledCount}/${items.length} active`;
+        }
+    }
+    
+    // --- LOAD SAVED CONTEXT ---
+    async function loadSavedContext(e) {
+        const files = e.target.files;
+        if (files.length === 0) return;
+        
+        window.notify(`Loading ${files.length} saved context file(s)...`, "info");
+        let loadedCount = 0;
+        
+        // Initialize items array if not exists
+        if (!window.UPLOADED_CONTEXT.items) {
+            window.UPLOADED_CONTEXT.items = [];
+        }
+        
+        for (let file of files) {
+            try {
+                const text = await file.text();
+                const itemId = 'ctx_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+                
+                // Store as toggleable item
+                window.UPLOADED_CONTEXT.items.push({
+                    id: itemId,
+                    name: file.name,
+                    type: 'Saved Context',
+                    content: text,
+                    enabled: true
+                });
+                
+                // Create toggleable row with save button
+                let d = document.createElement("div");
+                d.className = "context-item";
+                d.id = `ctx-row-${itemId}`;
+                d.style.cssText = "display:flex; align-items:center; gap:8px; padding:4px 0;";
+                d.innerHTML = `
+                    <input type="checkbox" checked onchange="toggleContextItem('${itemId}', this)" style="cursor:pointer;">
+                    <span style="color:#107c10; flex:1;">📂 ${file.name} (Saved Context)</span>
+                    <button onclick="saveIndividualContext('${itemId}')" style="background:#f3f2f1; border:1px solid #8a8886; border-radius:3px; padding:2px 6px; cursor:pointer; font-size:11px;" title="Save this context">💾</button>
+                `;
+                document.getElementById('file-list').appendChild(d);
+                loadedCount++;
+            } catch(err) {
+                window.notify(`Failed to load ${file.name}: ${err.message}`, "error");
+            }
+        }
+        
+        // Rebuild context
+        buildActiveContext();
+        updateContextBadge();
+        
+        // Hide empty message
+        document.getElementById('context-empty-msg').style.display = 'none';
+        
+        // Add summary
+        const summary = document.createElement("div");
+        summary.style.cssText = "margin-top:8px; padding:6px 10px; background:#d4edda; color:#155724; border-radius:4px; font-size:12px; font-weight:500;";
+        summary.innerText = `✅ ${loadedCount} saved context(s) loaded - Use checkboxes to toggle`;
+        document.getElementById('file-list').appendChild(summary);
+        
+        // Reset input for future use
+        e.target.value = '';
+    }
+    
+    // --- SAVE CONTEXT TO FILE ---
+    function saveContextToFile() {
+        const context = window.UPLOADED_CONTEXT.text;
+        if (!context || context.trim() === '') {
+            window.notify("No context to save. Attach files first.", "warn");
+            return;
+        }
+        
+        // Create filename with timestamp
+        const now = new Date();
+        const timestamp = now.toISOString().slice(0,10) + '_' + now.toTimeString().slice(0,5).replace(':','-');
+        const filename = `workbench_context_${timestamp}.md`;
+        
+        // Create and download file
+        const blob = new Blob([context], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+        
+        window.notify(`Context saved to ${filename}`, "success");
+    }
+    
+    // --- SAVE INDIVIDUAL CONTEXT ---
+    function saveIndividualContext(itemId) {
+        const items = window.UPLOADED_CONTEXT.items || [];
+        const item = items.find(i => i.id === itemId);
+        
+        if (!item) {
+            window.notify("Context item not found.", "error");
+            return;
+        }
+        
+        // Prompt user for filename
+        const defaultName = item.name.replace(/\.[^/.]+$/, ''); // Remove extension
+        const userFilename = prompt("Enter a name for this context file:", defaultName);
+        
+        if (!userFilename) {
+            return; // User cancelled
+        }
+        
+        // Sanitize filename and add .md extension
+        const sanitized = userFilename.replace(/[^a-zA-Z0-9_\-\s]/g, '_').trim();
+        const filename = `${sanitized}.md`;
+        
+        // Create content with header
+        const content = `# ${item.name}\n## Type: ${item.type}\n\n${item.content}`;
+        
+        // Create and download file
+        const blob = new Blob([content], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+        
+        window.notify(`Context saved as "${filename}"`, "success");
+    }
+
+    // --- EXTRACTORS ---
+    async function extractPDF(file) {
+        const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
+        let txt = "";
+        for(let i=1; i<=Math.min(pdf.numPages,5); i++) txt += (await (await pdf.getPage(i)).getTextContent()).items.map(s=>s.str).join(" ")+"\n";
+        return txt;
+    }
+    async function extractExcel(file) {
+        const wb = XLSX.read(await file.arrayBuffer());
+        let txt = "";
+        wb.SheetNames.slice(0,5).forEach(n => { txt += `[Sheet: ${n}]\n` + XLSX.utils.sheet_to_csv(wb.Sheets[n]); });
+        return txt;
+    }
+    async function extractDocx(file) {
+        const arrayBuffer = await file.arrayBuffer();
+        const result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
+        return result.value; 
+    }
+    const toBase64 = f => new Promise((r,j) => { const rd = new FileReader(); rd.onload=()=>r(rd.result); rd.readAsDataURL(f); });
+
+    // --- AZURE DOCUMENT INTELLIGENCE EXTRACTOR ---
+    async function extractWithAzureDocIntel(file) {
+        const endpoint = document.getElementById('docintel_endpoint').value.trim();
+        const key = document.getElementById('docintel_key').value.trim();
+        
+        if (!endpoint || !key) {
+            throw new Error('Azure Document Intelligence not configured. Check Settings.');
+        }
+        
+        // Convert file to base64
+        const arrayBuffer = await file.arrayBuffer();
+        const base64Data = btoa(new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), ''));
+        
+        // Determine content type
+        let contentType = 'application/octet-stream';
+        if (file.type === 'application/pdf') contentType = 'application/pdf';
+        else if (file.name.endsWith('.xlsx')) contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+        else if (file.name.endsWith('.docx')) contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        else if (file.type.startsWith('image/')) contentType = file.type;
+        
+        // Step 1: Submit document for analysis
+        const analyzeUrl = `${endpoint}/documentintelligence/documentModels/prebuilt-read:analyze?api-version=2024-11-30`;
+        
+        window.writeLog(`[Doc Intel] Submitting ${file.name} for analysis...`, 'info');
+        
+        const submitResp = await fetch(analyzeUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': contentType,
+                'Ocp-Apim-Subscription-Key': key
+            },
+            body: arrayBuffer
+        });
+        
+        if (!submitResp.ok) {
+            const errText = await submitResp.text();
+            throw new Error(`Doc Intel submit failed: ${submitResp.status} - ${errText}`);
+        }
+        
+        // Get operation location for polling
+        const operationLocation = submitResp.headers.get('Operation-Location');
+        if (!operationLocation) {
+            throw new Error('No Operation-Location header in response');
+        }
+        
+        window.writeLog(`[Doc Intel] Analysis started, polling for results...`, 'info');
+        
+        // Step 2: Poll for results (max 60 seconds)
+        let result = null;
+        for (let i = 0; i < 30; i++) {
+            await new Promise(r => setTimeout(r, 2000)); // Wait 2 seconds
+            
+            const pollResp = await fetch(operationLocation, {
+                headers: { 'Ocp-Apim-Subscription-Key': key }
+            });
+            
+            if (!pollResp.ok) {
+                throw new Error(`Polling failed: ${pollResp.status}`);
+            }
+            
+            const pollData = await pollResp.json();
+            
+            if (pollData.status === 'succeeded') {
+                result = pollData.analyzeResult;
+                break;
+            } else if (pollData.status === 'failed') {
+                throw new Error(`Analysis failed: ${JSON.stringify(pollData.error)}`);
+            }
+            // status is 'running' - continue polling
+        }
+        
+        if (!result) {
+            throw new Error('Document analysis timed out after 60 seconds');
+        }
+        
+        window.writeLog(`[Doc Intel] Analysis complete, converting to Markdown...`, 'success');
+        
+        // Step 3: Convert result to Markdown
+        return convertDocIntelToMarkdown(result, file.name);
+    }
+    
+    function convertDocIntelToMarkdown(result, filename) {
+        let md = `## Document: ${filename}\n\n`;
+        
+        // Extract paragraphs
+        if (result.paragraphs && result.paragraphs.length > 0) {
+            for (const para of result.paragraphs) {
+                if (para.role === 'title') {
+                    md += `# ${para.content}\n\n`;
+                } else if (para.role === 'sectionHeading') {
+                    md += `## ${para.content}\n\n`;
+                } else {
+                    md += `${para.content}\n\n`;
+                }
+            }
+        } else if (result.content) {
+            // Fallback to raw content if no paragraphs
+            md += result.content + '\n\n';
+        }
+        
+        // Extract tables
+        if (result.tables && result.tables.length > 0) {
+            md += `### Tables\n\n`;
+            for (let t = 0; t < result.tables.length; t++) {
+                const table = result.tables[t];
+                md += `**Table ${t + 1}:**\n\n`;
+                
+                // Build table grid
+                const grid = [];
+                for (const cell of table.cells) {
+                    if (!grid[cell.rowIndex]) grid[cell.rowIndex] = [];
+                    grid[cell.rowIndex][cell.columnIndex] = cell.content || '';
+                }
+                
+                // Convert to markdown table
+                if (grid.length > 0) {
+                    // Header row
+                    md += '| ' + (grid[0] || []).map(c => c || '').join(' | ') + ' |\n';
+                    md += '| ' + (grid[0] || []).map(() => '---').join(' | ') + ' |\n';
+                    // Data rows
+                    for (let r = 1; r < grid.length; r++) {
+                        md += '| ' + (grid[r] || []).map(c => c || '').join(' | ') + ' |\n';
+                    }
+                    md += '\n';
+                }
+            }
+        }
+        
+        return md;
+    }
+
+    // --- UI HELPERS ---
+    function openModalJS(uid) { if(window.py_populate_modal) window.py_populate_modal(uid); }
+    function closeModal() { document.getElementById('modal-overlay').classList.remove('active'); }
+    function removeStoryReview(uid) { 
+        document.getElementById(uid).remove(); 
+        updateReviewCount();
+    }
+    
+    // --- CONTEXT SECTION CONTROLS ---
+    function toggleContextSection() {
+        document.getElementById('context-section').classList.toggle('collapsed');
+    }
+    
+    function updateContextBadge() {
+        const items = window.UPLOADED_CONTEXT.items || [];
+        const enabledCount = items.filter(i => i.enabled).length;
+        const badge = document.getElementById('context-count-badge');
+        const emptyMsg = document.getElementById('context-empty-msg');
+        const countLabel = document.getElementById('file-count-label');
+        
+        if (items.length > 0) {
+            badge.innerText = `${enabledCount}/${items.length} active`;
+            countLabel.innerText = `${enabledCount}/${items.length} context`;
+            if (emptyMsg) emptyMsg.style.display = 'none';
+        } else {
+            badge.innerText = '0 items';
+            countLabel.innerText = 'No context';
+            if (emptyMsg) emptyMsg.style.display = 'block';
+        }
+    }
+    
+    // --- SETTINGS SECTION CONTROLS ---
+    function toggleSettingsSection(sectionId) {
+        document.getElementById(sectionId).classList.toggle('collapsed');
+    }
+    
+    // --- REVIEW SECTION CONTROLS ---
+    function toggleReviewSection() {
+        document.getElementById('story-review-section').classList.toggle('collapsed');
+    }
+    
+    function toggleAllReviewChecks(checked) {
+        const checkboxes = document.querySelectorAll('.review-story-check');
+        checkboxes.forEach(cb => {
+            cb.checked = checked;
+            updateReviewCardStyle(cb);
+        });
+    }
+    
+    function clearReviewSection() {
+        if(!confirm("Clear all fetched stories from the review section?")) return;
+        
+        // Clear the grid
+        document.getElementById('story-review-grid').innerHTML = '';
+        
+        // Hide the section
+        const section = document.getElementById('story-review-section');
+        section.style.display = 'none';
+        section.classList.add('collapsed');
+        
+        // Reset the count badge
+        document.getElementById('review-count-badge').innerText = '0 stories';
+        
+        // Clear any stored review data
+        window.REVIEW_STORIES = {};
+        
+        window.notify("Review section cleared.", "info");
+    }
+    
+    function toggleReviewCheck(checkbox) {
+        updateReviewCardStyle(checkbox);
+    }
+    
+    function updateReviewCardStyle(checkbox) {
+        const card = checkbox.closest('.story-review-card');
+        if (checkbox.checked) {
+            card.classList.remove('unselected');
+        } else {
+            card.classList.add('unselected');
+        }
+    }
+    
+    function toggleStoryCard(cardEl) {
+        cardEl.classList.toggle('collapsed');
+    }
+    
+    // Store modal story data for toggle between generated/original views
+    window.MODAL_STORY_DATA = { generated: {desc:'', ac:''}, original: {desc:'', ac:''}, hasOriginal: false };
+    
+    // Toggle card view between refined and original
+    function toggleCardView(uid, view) {
+        const descBox = document.getElementById('desc-' + uid);
+        const acBox = document.getElementById('ac-' + uid);
+        const refinedBtn = document.getElementById('btn-card-refined-' + uid);
+        const originalBtn = document.getElementById('btn-card-original-' + uid);
+        
+        if (!descBox || !acBox) return;
+        
+        // Before switching, save current content if we're in refined view (preserve user edits)
+        if (refinedBtn.classList.contains('active')) {
+            // Save current DOM content as the "refined" version (includes user edits)
+            window.py_save_refined_edits(uid, descBox.innerHTML, acBox.innerHTML);
+        }
+        
+        // Get original from Python REVIEW_STAGED via window call
+        if (view === 'original') {
+            window.py_show_original_in_card(uid);
+            refinedBtn.classList.remove('active');
+            originalBtn.classList.add('active');
+            descBox.contentEditable = 'false';
+            acBox.contentEditable = 'false';
+            descBox.style.background = '#f5f5f5';
+            acBox.style.background = '#f5f5f5';
+        } else {
+            window.py_show_refined_in_card(uid);
+            refinedBtn.classList.add('active');
+            originalBtn.classList.remove('active');
+            descBox.contentEditable = 'true';
+            acBox.contentEditable = 'true';
+            descBox.style.background = '#fff';
+            acBox.style.background = '#fff';
+        }
+    }
+    
+    function toggleStoryView(view) {
+        const data = window.MODAL_STORY_DATA;
+        const descEl = document.getElementById('story-desc-display');
+        const acEl = document.getElementById('story-ac-display');
+        const genBtn = document.getElementById('btn-view-generated');
+        const origBtn = document.getElementById('btn-view-original');
+        const indicator = document.getElementById('original-indicator');
+        
+        if (view === 'original' && data.hasOriginal) {
+            descEl.innerHTML = data.original.desc;
+            acEl.innerHTML = data.original.ac;
+            genBtn.classList.remove('active');
+            origBtn.classList.add('active');
+            indicator.classList.add('visible');
+        } else {
+            descEl.innerHTML = data.generated.desc;
+            acEl.innerHTML = data.generated.ac;
+            genBtn.classList.add('active');
+            origBtn.classList.remove('active');
+            indicator.classList.remove('visible');
+        }
+    }
+    
+    function updateReviewCount() {
+        const cards = document.querySelectorAll('#story-review-grid .story-review-card');
+        const badge = document.getElementById('review-count-badge');
+        badge.textContent = cards.length + ' stor' + (cards.length === 1 ? 'y' : 'ies');
+    }
+    
+    function toggleTCSection(sectionId) {
+        document.getElementById(sectionId).classList.toggle('collapsed');
+    }
+    
+    function updateTCSectionCount(gridId, sectionId) {
+        const groups = document.querySelectorAll('#' + gridId + ' .tc-group');
+        let totalItems = 0;
+        groups.forEach(g => {
+            const countEl = g.querySelector('.tc-group-count');
+            if(countEl) {
+                const match = countEl.textContent.match(/\d+/);
+                if(match) totalItems += parseInt(match[0]);
+            }
+        });
+        const section = document.getElementById(sectionId);
+        // Badge ID: ai-tc-section -> ai-tc-count-badge, manual-tc-section -> manual-tc-count-badge
+        const badgeId = sectionId.replace('-section', '-count-badge');
+        const badge = document.getElementById(badgeId);
+        if(badge) badge.textContent = totalItems + ' item' + (totalItems !== 1 ? 's' : '');
+        if(totalItems > 0) {
+            section.classList.add('has-items');
+        } else {
+            section.classList.remove('has-items');
+        }
+    }
+
+    // --- ROW CONTROLS ---
+    window.CTRL_BTNS = `
+        <div style="display:flex; gap:4px; justify-content:center;">
+            <button onclick="rowAction(this,'moveUp')">↑</button> 
+            <button onclick="rowAction(this,'moveDown')">↓</button>
+            <button onclick="rowAction(this,'add')">＋</button> 
+            <button onclick="rowAction(this,'del')" style="color:red;">✕</button>
+        </div>
+    `;
+    window.rowAction = function(btn, act) {
+        const row = btn.closest('tr');
+        const tb = row.parentNode;
+        if(act==='del') { if(tb.rows.length>1) row.remove(); }
+        else if(act==='add') {
+            const nr = document.createElement('tr');
+            nr.innerHTML = `<td contenteditable="true"></td><td contenteditable="true"></td><td>${window.CTRL_BTNS}</td>`;
+            tb.insertBefore(nr, row.nextElementSibling);
+        } else if(act==='moveUp' && row.previousElementSibling) tb.insertBefore(row, row.previousElementSibling);
+        else if(act==='moveDown' && row.nextElementSibling) tb.insertBefore(row.nextElementSibling, row);
+    }
+
+    // --- TABLE VIEW FUNCTIONS ---
+    function toggleGroup(groupEl) {
+        groupEl.classList.toggle('collapsed');
+    }
+
+    function toggleRow(e, uid) {
+        e.stopPropagation();
+        const row = document.getElementById("row-"+uid);
+        const cb = row.querySelector(".tc-check");
+        if(cb.checked) row.classList.add("selected"); else row.classList.remove("selected");
+        
+        // Update parent group checkbox state
+        updateGroupCheckboxState(row.closest('.tc-group'));
+    }
+
+    function toggleGroupSelection(groupCheckbox) {
+        const uids = groupCheckbox.dataset.uids.split(',');
+        const isChecked = groupCheckbox.checked;
+        
+        uids.forEach(uid => {
+            const row = document.getElementById('row-' + uid);
+            if(row) {
+                const cb = row.querySelector('.tc-check');
+                if(cb) {
+                    cb.checked = isChecked;
+                    if(isChecked) row.classList.add('selected'); 
+                    else row.classList.remove('selected');
+                }
+            }
+        });
+        
+        // Reset indeterminate state
+        groupCheckbox.indeterminate = false;
+    }
+
+    function updateGroupCheckboxState(group) {
+        if(!group) return;
+        const groupCb = group.querySelector('.tc-group-check');
+        if(!groupCb) return;
+        
+        const rowCbs = group.querySelectorAll('.tc-check');
+        const total = rowCbs.length;
+        const checked = Array.from(rowCbs).filter(cb => cb.checked).length;
+        
+        if(checked === 0) {
+            groupCb.checked = false;
+            groupCb.indeterminate = false;
+        } else if(checked === total) {
+            groupCb.checked = true;
+            groupCb.indeterminate = false;
+        } else {
+            groupCb.checked = false;
+            groupCb.indeterminate = true;
+        }
+    }
+
+    function toggleAllChecks(gridId) {
+        const grid = document.getElementById(gridId);
+        if(!grid) { console.error('Grid not found:', gridId); return; }
+        
+        const cbs = grid.querySelectorAll(".tc-check");
+        if(cbs.length === 0) { window.notify("No items to select.", "warn"); return; }
+        
+        const allSelected = Array.from(cbs).every(c => c.checked);
+        cbs.forEach(c => {
+            c.checked = !allSelected;
+            const row = c.closest("tr");
+            if(c.checked) row.classList.add("selected"); else row.classList.remove("selected");
+        });
+        
+        // Also update all group checkboxes
+        grid.querySelectorAll('.tc-group').forEach(group => {
+            updateGroupCheckboxState(group);
+        });
+    }
+
+    function bulkPushAction(gridId) {
+        const grid = document.getElementById(gridId);
+        if(!grid) { console.error('Grid not found:', gridId); return; }
+        
+        const selected = Array.from(grid.querySelectorAll(".tc-check:checked")).map(c => c.closest("tr").id.replace("row-",""));
+        if(selected.length===0) { window.notify("Please select items to push first.", "warn"); return; }
+        if(confirm(`Push ${selected.length} item(s) to ADO?`)) window.py_bulk_push(selected);
+    }
+
+    function bulkDownloadCSV(gridId) {
+        const grid = document.getElementById(gridId);
+        if(!grid) { console.error('Grid not found:', gridId); return; }
+        
+        const selected = Array.from(grid.querySelectorAll(".tc-check:checked")).map(c => c.closest("tr").id.replace("row-",""));
+        if(selected.length===0) { window.notify("Please select items to download first.", "warn"); return; }
+        
+        triggerCSVDownload(selected);
+        window.notify(`Downloaded ${selected.length} item(s).`, "success");
+    }
+
+    function singleDownloadCSV(uid) {
+        window.py_save_draft(uid);
+        triggerCSVDownload([uid]);
+    }
+
+    function triggerCSVDownload(uids) {
+        const csv = window.py_get_csv_content(uids);
+        const blob = new Blob([csv], {type:'text/csv'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href=url; a.download='test_cases.csv'; a.click();
+    }
+
+    function deleteRow(uid) {
+        const row = document.getElementById("row-"+uid);
+        if(row) {
+            window.py_delete_items([uid]);
+            row.remove();
+            updateGroupCounts();
+            window.notify("Item deleted.", "success");
+        }
+    }
+
+    function deleteSelected(gridId) {
+        const grid = document.getElementById(gridId);
+        if(!grid) { console.error('Grid not found:', gridId); return; }
+        
+        const selected = Array.from(grid.querySelectorAll(".tc-check:checked")).map(c => c.closest("tr"));
+        if(selected.length === 0) { window.notify("Select items to delete first.", "warn"); return; }
+        
+        if(!confirm(`Delete ${selected.length} selected item(s)?`)) return;
+        
+        const uids = selected.map(r => r.id.replace("row-", ""));
+        window.py_delete_items(uids); 
+        selected.forEach(r => r.remove());
+        updateGroupCounts();
+        
+        // Update section count badge
+        const sectionId = gridId === 'ai-grid' ? 'ai-tc-section' : 'manual-tc-section';
+        updateTCSectionCount(gridId, sectionId);
+        
+        window.notify(`Deleted ${selected.length} item(s).`, "success");
+    }
+
+    function clearGrid(gridId) {
+        const grid = document.getElementById(gridId);
+        if(!grid) { console.error('Grid not found:', gridId); return; }
+        
+        const rows = grid.querySelectorAll("tr[id^='row-']");
+        if(rows.length === 0) { window.notify("No items to clear.", "warn"); return; }
+        
+        if(!confirm(`Clear all ${rows.length} item(s) in this view?`)) return;
+        
+        const uids = Array.from(rows).map(r => r.id.replace("row-", ""));
+        window.py_delete_items(uids);
+        grid.innerHTML = "";
+        
+        // Update section count badge
+        const sectionId = gridId === 'ai-grid' ? 'ai-tc-section' : 'manual-tc-section';
+        updateTCSectionCount(gridId, sectionId);
+        
+        window.notify("All items cleared.", "info");
+    }
+
+    function updateGroupCounts() {
+        document.querySelectorAll('.tc-group').forEach(group => {
+            const count = group.querySelectorAll('tr[id^="row-"]').length;
+            const countEl = group.querySelector('.tc-group-count');
+            if(countEl) countEl.innerText = count + ' item' + (count !== 1 ? 's' : '');
+            if(count === 0) group.remove();
+        });
+    }
+
+    // Render grouped table from STAGED data
+    window.renderGroupedTable = function(gridId, source) {
+        const grid = document.getElementById(gridId);
+        grid.innerHTML = '';
+        
+        // Group by story_id
+        const groups = {};
+        const otherGroup = [];
+        
+        Object.entries(window.STAGED_DATA || {}).forEach(([uid, tc]) => {
+            if(tc._source !== source) return;
+            const storyId = tc.story_id;
+            const isLinked = tc.story_desc || tc.story_ac;
+            
+            if(!storyId || storyId === 'MANUAL' || storyId === '') {
+                otherGroup.push({uid, tc});
+            } else {
+                if(!groups[storyId]) groups[storyId] = {title: tc.story_title || 'Unknown Story', items: []};
+                groups[storyId].items.push({uid, tc});
+            }
+        });
+        
+        // Render story groups
+        Object.entries(groups).forEach(([storyId, group]) => {
+            grid.appendChild(createGroupElement(storyId, group.title, group.items, false));
+        });
+        
+        // Render "Other" group
+        if(otherGroup.length > 0) {
+            grid.appendChild(createGroupElement('other', 'Other (No Story Linked)', otherGroup, true));
+        }
+        
+        // Update section count badge
+        const sectionId = gridId === 'ai-grid' ? 'ai-tc-section' : 'manual-tc-section';
+        updateTCSectionCount(gridId, sectionId);
+    }
+
+    function createGroupElement(storyId, title, items, isOther) {
+        const group = document.createElement('div');
+        group.className = 'tc-group collapsed';  // Collapsed by default
+        group.id = 'group-' + storyId;
+        
+        const headerClass = isOther ? 'tc-group-header other' : 'tc-group-header';
+        const displayTitle = isOther ? title : `Story #${storyId}: ${title}`;
+        
+        // Collect UIDs for this group
+        const uids = items.map(i => i.uid).join(',');
+        
+        group.innerHTML = `
+            <div class="${headerClass}">
+                <div style="display:flex; align-items:center; flex:1;">
+                    <input type="checkbox" class="tc-group-check" data-uids="${uids}" onclick="event.stopPropagation(); toggleGroupSelection(this)" title="Select/Deselect all in this story">
+                    <div class="tc-group-title" onclick="toggleGroup(this.closest('.tc-group'))" style="flex:1; cursor:pointer;">
+                        <span class="tc-group-toggle">▼</span>
+                        ${displayTitle}
+                    </div>
+                </div>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <button class="tc-group-btn" onclick="event.stopPropagation(); pushGroupToADO('${uids}')" title="Push all TCs in this group to ADO">🚀 Push All</button>
+                    <button class="tc-group-btn" onclick="event.stopPropagation(); downloadGroupCSV('${uids}')" title="Download all TCs in this group">⬇️ CSV</button>
+                    <span class="tc-group-count">${items.length} item${items.length !== 1 ? 's' : ''}</span>
+                </div>
+            </div>
+            <div class="tc-group-body">
+                <table class="tc-table">
+                    <thead>
+                        <tr>
+                            <th style="width:40px;"></th>
+                            <th>Title</th>
+                            <th style="width:60px; text-align:center;">Steps</th>
+                            <th style="width:70px; text-align:center;">Confidence</th>
+                            <th style="width:80px; text-align:center;">Status</th>
+                            <th style="width:100px; text-align:center;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        `;
+        
+        const tbody = group.querySelector('tbody');
+        items.forEach(({uid, tc}) => {
+            const row = createRowElement(uid, tc);
+            tbody.appendChild(row);
+        });
+        
+        return group;
+    }
+
+    function downloadGroupCSV(uidsStr) {
+        const uids = uidsStr.split(',');
+        if(uids.length === 0) { window.notify("No items to download.", "warn"); return; }
+        triggerCSVDownload(uids);
+        window.notify(`Downloaded ${uids.length} test case(s).`, "success");
+    }
+
+    function pushGroupToADO(uidsStr) {
+        const uids = uidsStr.split(',');
+        if(uids.length === 0) { window.notify("No items to push.", "warn"); return; }
+        if(confirm(`Push all ${uids.length} test case(s) in this story to ADO?`)) {
+            window.py_bulk_push(uids);
+        }
+    }
+
+    function createRowElement(uid, tc) {
+        const row = document.createElement('tr');
+        row.id = 'row-' + uid;
+        
+        const confidence = tc.confidence || 0;
+        const confClass = confidence >= 80 ? 'confidence-high' : confidence >= 50 ? 'confidence-medium' : 'confidence-low';
+        const confDisplay = confidence > 0 ? `<span class="confidence-badge ${confClass}">${confidence}%</span>` : '<span style="color:#a19f9d;">--</span>';
+        
+        const isLinked = tc.story_desc || tc.story_ac;
+        const isAI = tc._source === 'ai';
+        let statusBadge = '';
+        if(isLinked) {
+            statusBadge = '<span class="status-badge linked">🔗 Linked</span>';
+        } else if(isAI) {
+            statusBadge = '<span class="status-badge ai">🤖 AI</span>';
+        } else {
+            statusBadge = '<span class="status-badge manual">📝 Manual</span>';
+        }
+        
+        // Escape title for attribute and add tooltip
+        const escapedTitle = tc.title.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        
+        row.innerHTML = `
+            <td onclick="toggleRow(event, '${uid}')"><input type="checkbox" class="tc-check" onclick="toggleRow(event, '${uid}')"></td>
+            <td title="${escapedTitle}"><span class="tc-row-title" onclick="openModalJS('${uid}')">${tc.title}</span></td>
+            <td class="tc-row-steps">${tc.steps ? tc.steps.length : 0}</td>
+            <td class="tc-row-conf">${confDisplay}</td>
+            <td class="tc-row-status">${statusBadge}</td>
+            <td class="tc-row-actions">
+                <button onclick="openModalJS('${uid}')" title="Edit">✏️</button>
+                <button onclick="singleDownloadCSV('${uid}')" title="Download CSV">⬇️</button>
+                <button onclick="deleteRow('${uid}')" title="Delete" style="color:#a80000;">🗑️</button>
+            </td>
+        `;
+        
+        return row;
+    }
+
+    // Global STAGED_DATA for JS access
+    window.STAGED_DATA = {};
+</script>
+
+<script type="py" config='{"packages": ["pyodide-http"]}'>
+import json, base64, uuid, re, html, csv, io, asyncio
+from js import document, localStorage, window
+from pyodide.http import pyfetch
+from pyodide.ffi import create_proxy
+
+# --- STATE ---
+KEYS = ["ado_url", "ado_project", "ado_pat", "ai_provider", "ai_endpoint", "ai_key", "ai_deployment", "ai_version", "openai_base_url", "openai_key", "openai_model", "responses_base_url", "responses_key", "responses_model", "parsing_mode", "docintel_endpoint", "docintel_key", "sys_instruction"]
+STAGED = {} 
+REVIEW_STAGED = {}  # Original fetched content (source of truth)
+REFINED_CONTENT = {}  # Stores refined content for toggle view 
+DEFAULT_INSTRUCTION = """### ROLE & OBJECTIVE
+You are an Expert QA Test Strategist focused on LEAN TEST DESIGN.
+
+### ⚠️ CRITICAL PRINCIPLE
+**Each test case MUST uniquely contribute to optimized test coverage.** 
+If a test case does not add NEW, DISTINCT coverage value - DO NOT create it.
+
+### STRICT OUTPUT LIMIT: 2-4 TEST CASES ONLY
+- Generate the FEWEST test cases possible (ideally 2-3, maximum 4)
+- Before creating a test, ask: "Does this add UNIQUE coverage not already covered?"
+- If NO → Merge it into an existing test case
+- If YES → Create it only if essential
+
+### MANDATORY OPTIMIZATION TECHNIQUES
+1. **Workflow Chaining:** Combine related actions into ONE end-to-end test (Create → Edit → Verify → Delete = 1 test)
+2. **Validation Bundling:** Group ALL field validations into ONE negative test case
+3. **Boundary Consolidation:** Test min/max/edge values in ONE test case
+4. **State Coverage:** Verify multiple states by transitioning through them in one test
+
+### COVERAGE STRATEGY (within 2-4 tests)
+- Test 1: Happy Path - Complete positive workflow
+- Test 2: Negative/Validation - All error conditions bundled  
+- Test 3: Edge Cases/Boundaries (only if distinct)
+- Test 4: Only if absolutely necessary for unique scenario
+
+### INPUT SCOPE
+- **Primary Source:** User Story + Acceptance Criteria ONLY
+- **Attachments:** Context only - do not expand scope
+
+### FORMAT RULES
+- Titles: Start with "Verify that..." (max 200 chars)
+- Steps: Granular actions with specific expected results
+
+"""
+
+STRICT_SCHEMA = {
+    "name": "test_case_response",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            "testCases": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "description": { "type": "string" },
+                        "confidence": { "type": "number", "description": "Confidence score 0-100 based on clarity of requirements" },
+                        "steps": {
+                            "type": "array",
+                            "items": { "type": "object", "properties": { "action": { "type": "string" }, "expectedResult": { "type": "string" } }, "required": ["action", "expectedResult"], "additionalProperties": False }
+                        }
+                    },
+                    "required": ["description", "confidence", "steps"], "additionalProperties": False
+                }
+            }
+        },
+        "required": ["testCases"], "additionalProperties": False
+    }
+}
+
+# Schema for Apply Fix - enforces exactly 1 test case
+SINGLE_TC_SCHEMA = {
+    "name": "single_test_case_response",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            "testCase": {
+                "type": "object",
+                "properties": {
+                    "description": { "type": "string", "description": "Clean test case title only - no notes or explanations" },
+                    "confidence": { "type": "number", "description": "Confidence score 0-100" },
+                    "steps": {
+                        "type": "array",
+                        "items": { "type": "object", "properties": { "action": { "type": "string" }, "expectedResult": { "type": "string" } }, "required": ["action", "expectedResult"], "additionalProperties": False }
+                    }
+                },
+                "required": ["description", "confidence", "steps"], "additionalProperties": False
+            }
+        },
+        "required": ["testCase"], "additionalProperties": False
+    }
+}
+
+def log(msg, type="info"): window.writeLog(msg, type)
+def notify(msg, type="info"): window.notify(msg, type)
+
+# --- CONFIG & VALIDATION ---
+def validate_config():
+    missing = []
+    # ADO fields always required
+    for k in ["ado_url", "ado_project", "ado_pat"]:
+        val = document.getElementById(k).value.strip()
+        if not val:
+            document.getElementById(k).classList.add("error-field")
+            missing.append(k)
+        else:
+            document.getElementById(k).classList.remove("error-field")
+    
+    # AI fields based on provider
+    provider = document.getElementById("ai_provider").value
+    if provider == "azure":
+        for k in ["ai_endpoint", "ai_key", "ai_deployment"]:
+            val = document.getElementById(k).value.strip()
+            if not val:
+                document.getElementById(k).classList.add("error-field")
+                missing.append(k)
+            else:
+                document.getElementById(k).classList.remove("error-field")
+    elif provider == "openai":
+        for k in ["openai_base_url", "openai_key", "openai_model"]:
+            val = document.getElementById(k).value.strip()
+            if not val:
+                document.getElementById(k).classList.add("error-field")
+                missing.append(k)
+            else:
+                document.getElementById(k).classList.remove("error-field")
+    elif provider == "responses":
+        for k in ["responses_base_url", "responses_key", "responses_model"]:
+            val = document.getElementById(k).value.strip()
+            if not val:
+                document.getElementById(k).classList.add("error-field")
+                missing.append(k)
+            else:
+                document.getElementById(k).classList.remove("error-field")
+    
+    # Doc Intel fields if Azure parsing mode selected
+    parsing_mode = document.getElementById("parsing_mode").value
+    if parsing_mode == "azure":
+        for k in ["docintel_endpoint", "docintel_key"]:
+            val = document.getElementById(k).value.strip()
+            if not val:
+                document.getElementById(k).classList.add("error-field")
+                missing.append(k)
+            else:
+                document.getElementById(k).classList.remove("error-field")
+    return missing
+
+def py_save_config(*args):
+    missing = validate_config()
+    if missing:
+        notify("Cannot Save: Missing Required Fields (marked red).", "error")
+        return
+    for k in KEYS: 
+        el = document.getElementById(k)
+        if el: localStorage.setItem(k, el.value.strip())
+    notify("Settings successfully saved.", "success")
+
+def py_reset_instruction(*args):
+    document.getElementById("sys_instruction").value = DEFAULT_INSTRUCTION
+    notify("System instructions reset to default.", "info")
+
+def py_export_prompt_md(*args):
+    """Export system prompt to .md file"""
+    prompt = document.getElementById("sys_instruction").value
+    if not prompt.strip():
+        notify("No system prompt to export.", "warn")
+        return
+    
+    blob = window.Blob.new([prompt], {"type": "text/markdown"})
+    url = window.URL.createObjectURL(blob)
+    a = document.createElement("a")
+    a.href = url
+    a.download = "system_prompt.md"
+    a.click()
+    window.URL.revokeObjectURL(url)
+    notify("System prompt exported to .md file.", "success")
+
+async def py_import_prompt_md(file_input):
+    """Import system prompt from .md file"""
+    files = file_input.files
+    if not files or files.length == 0:
+        return
+    
+    file = files.item(0)
+    try:
+        text = await file.text()
+        document.getElementById("sys_instruction").value = text
+        file_input.value = ""
+        notify(f"System prompt imported from {file.name}", "success")
+        log(f"Loaded prompt: {len(text)} characters", "info")
+    except Exception as e:
+        notify("Failed to import prompt file.", "error")
+        log(f"Import Error: {str(e)}", "error")
+        file_input.value = ""
+
+def py_export_config_json(*args):
+    """Export config to JSON file (excludes system prompt)"""
+    config = {}
+    export_keys = ["ado_url", "ado_project", "ado_pat", "ai_provider", "ai_endpoint", "ai_key", "ai_deployment", "ai_version", "openai_base_url", "openai_key", "openai_model", "responses_base_url", "responses_key", "responses_model", "parsing_mode", "docintel_endpoint", "docintel_key"]
+    for k in export_keys:
+        el = document.getElementById(k)
+        if el:
+            config[k] = el.value.strip()
+    
+    json_str = json.dumps(config, indent=2)
+    blob = window.Blob.new([json_str], {"type": "application/json"})
+    url = window.URL.createObjectURL(blob)
+    a = document.createElement("a")
+    a.href = url
+    a.download = "test_workbench_config.json"
+    a.click()
+    window.URL.revokeObjectURL(url)
+    notify("Config exported to JSON file.", "success")
+
+async def py_import_config_json(file_input):
+    """Import config from JSON file"""
+    files = file_input.files
+    if not files or files.length == 0:
+        return
+    
+    file = files.item(0)
+    try:
+        text = await file.text()
+        config = json.loads(text)
+        
+        import_keys = ["ado_url", "ado_project", "ado_pat", "ai_provider", "ai_endpoint", "ai_key", "ai_deployment", "ai_version", "openai_base_url", "openai_key", "openai_model", "responses_base_url", "responses_key", "responses_model", "parsing_mode", "docintel_endpoint", "docintel_key"]
+        loaded_count = 0
+        for k in import_keys:
+            if k in config:
+                el = document.getElementById(k)
+                if el:
+                    el.value = config[k]
+                    loaded_count += 1
+        
+        # Clear the file input for future imports
+        file_input.value = ""
+        
+        notify(f"Config imported successfully. Loaded {loaded_count} settings.", "success")
+        log(f"Imported config with {loaded_count} fields.", "info")
+    except Exception as e:
+        notify("Failed to import config. Invalid JSON file.", "error")
+        log(f"Import Error: {str(e)}", "error")
+        file_input.value = ""
+
+# --- HELPER: IMAGES ---
+async def inline_ado_images(html_content, base_url, auth_header):
+    if not html_content: return ""
+    img_matches = re.findall(r'<img[^>]+src="([^">]+)"', html_content)
+    if img_matches: log(f"Found {len(img_matches)} images in content, inlining...", "debug")
+    for src in img_matches:
+        target_url = src
+        if not src.startswith("http"):
+            target_url = f"{base_url}{src}" if src.startswith("/") else f"{base_url}/{src}"
+        
+        log(f"GET Img: {target_url[:60]}...", "debug")
+        try:
+            res = await pyfetch(target_url, method="GET", headers={"Authorization": f"Basic {auth_header}"})
+            if res.ok:
+                blob = await res.bytes()
+                b64_str = base64.b64encode(blob).decode('utf-8')
+                mime = "image/png"
+                if "jpeg" in src or "jpg" in src: mime = "image/jpeg"
+                html_content = html_content.replace(src, f"data:{mime};base64,{b64_str}")
+            else: log(f"Img Fetch Fail: {res.status}", "warn")
+        except Exception as e: log(f"Img Error: {str(e)}", "warn")
+    return html_content
+
+def extract_text_and_images(html_content):
+    """Extract clean text and base64 images from HTML content"""
+    if not html_content: return "No content", []
+    images = []
+    
+    # Extract base64 images first
+    def repl(m):
+        img_tag = m.group(0)
+        src_m = re.search(r'src="(data:image/[^;]+;base64,[^"]+)"', img_tag)
+        if src_m:
+            images.append(src_m.group(1))
+            return "[IMAGE]" 
+        return "" 
+    
+    text_content = re.sub(r'<img[^>]*>', repl, html_content)
+    
+    # Remove script/style tags
+    text_content = re.sub(r'<(script|style)[^>]*>.*?</\1>', '', text_content, flags=re.DOTALL)
+    
+    # Convert HTML structure to readable text
+    text_content = re.sub(r'<br\s*/?>', '\n', text_content)  # <br> → newline
+    text_content = re.sub(r'</p>\s*<p[^>]*>', '\n\n', text_content)  # </p><p> → double newline
+    text_content = re.sub(r'</(div|p|h[1-6])>', '\n', text_content)  # Block elements → newline
+    text_content = re.sub(r'<li[^>]*>', '\n• ', text_content)  # <li> → bullet
+    text_content = re.sub(r'<[^>]+>', '', text_content)  # Remove remaining HTML tags
+    
+    # Clean up whitespace
+    text_content = html.unescape(text_content)
+    text_content = re.sub(r'\n\s*\n\s*\n+', '\n\n', text_content)  # Multiple newlines → max 2
+    text_content = re.sub(r'[ \t]+', ' ', text_content)  # Multiple spaces → single space
+    
+    return text_content.strip(), images
+
+# --- AI FETCH & GENERATE ---
+async def py_fetch_review(*args):
+    # Validation
+    raw_ids = document.getElementById("story_ids").value
+    if not raw_ids.strip():
+        notify("Please enter Story IDs first.", "warn")
+        return
+    
+    missing_config = validate_config()
+    if missing_config:
+        notify("Configure Settings before fetching.", "error")
+        return
+
+    btn = document.getElementById("btn-fetch-edit")
+    btn.disabled = True; btn.innerText = "..."
+    document.getElementById("story-review-section").style.display = "block"
+    document.getElementById("story-review-grid").innerHTML = ""
+    REVIEW_STAGED.clear()
+
+    try:
+        pat = document.getElementById("ado_pat").value.strip()
+        auth = base64.b64encode(f":{pat}".encode("ascii")).decode("ascii")
+        headers = {"Authorization": f"Basic {auth}", "Content-Type": "application/json"}
+        ids = raw_ids.split(',')
+        base = document.getElementById("ado_url").value.strip().rstrip('/')
+        proj = document.getElementById("ado_project").value.strip()
+        
+        log(f"Fetching {len(ids)} items from ADO...", "info")
+        success_count = 0
+        for sid in [x.strip() for x in ids if x.strip()]:
+            url = f"{base}/{proj}/_apis/wit/workItems/{sid}?api-version=7.1"
+            log(f"GET {url}", "debug")
+            
+            res = await pyfetch(url, method="GET", headers=headers)
+            if not res.ok: 
+                if res.status == 401: notify(f"Auth Failed for ID {sid}. Check PAT.", "error")
+                elif res.status == 404: notify(f"Story ID {sid} not found.", "warn")
+                else: notify(f"Error {res.status} fetching {sid}", "error")
+                continue
+            
+            story = await res.json()
+            success_count += 1
+            
+            raw_desc = story['fields'].get('System.Description', '')
+            raw_ac = story['fields'].get('Microsoft.VSTS.Common.AcceptanceCriteria', '')
+            proc_desc = await inline_ado_images(raw_desc, base, auth)
+            proc_ac = await inline_ado_images(raw_ac, base, auth)
+
+            uid = str(uuid.uuid4())
+            REVIEW_STAGED[uid] = {
+                "id": sid, "title": story['fields'].get('System.Title', 'Untitled'),
+                "desc": proc_desc, "ac": proc_ac,
+                "url": story['url'], "area": story['fields'].get("System.AreaPath"), "iter": story['fields'].get("System.IterationPath"),
+                "base": base, "proj": proj, "auth": auth 
+            }
+
+            card = document.createElement("div")
+            card.className = "story-review-card collapsed"
+            card.id = f"review-{uid}"
+            card.innerHTML = f"""
+                <div class="story-card-header" onclick="toggleStoryCard(this.parentElement)">
+                    <div class="story-card-title">
+                        <span class="story-card-toggle">▼</span>
+                        <input type="checkbox" class="review-story-check" data-uid="{uid}" checked onchange="event.stopPropagation(); toggleReviewCheck(this)">
+                        <span>Story {sid}: {REVIEW_STAGED[uid]['title']}</span>
+                    </div>
+                    <button class="action-btn" style="padding:2px 8px; background:rgba(0,0,0,0.1); border-radius:3px;" onclick="event.stopPropagation(); removeStoryReview('review-{uid}')">✖</button>
+                </div>
+                <div class="story-card-body">
+                    <div class="card-view-toggle" id="card-view-toggle-{uid}">
+                        <button class="card-view-btn active" id="btn-card-refined-{uid}" onclick="event.stopPropagation(); toggleCardView('{uid}', 'refined')">📝 Refined</button>
+                        <button class="card-view-btn" id="btn-card-original-{uid}" onclick="event.stopPropagation(); toggleCardView('{uid}', 'original')">📋 Original</button>
+                    </div>
+                    <label>Description</label>
+                    <div class="editable-box" contenteditable="true" id="desc-{uid}">{proc_desc}</div>
+                    <label>Acceptance Criteria</label>
+                    <div class="editable-box" contenteditable="true" id="ac-{uid}">{proc_ac}</div>
+                    <div class="story-card-actions">
+                        <div class="refine-input-wrapper" style="flex:1; display:flex; align-items:center; background:#fffbe6; border:2px solid #f5c400; border-radius:4px; padding:2px 8px; min-width:200px;">
+                            <span style="font-size:12px; margin-right:6px;">💡</span>
+                            <input type="text" class="refine-hint" id="refine-hint-{uid}" placeholder="Guide refinement (e.g., 'focus on error handling')" style="flex:1; padding:6px 4px; font-size:12px; border:none; background:transparent; outline:none;">
+                        </div>
+                        <button class="btn-refine" id="btn-refine-{uid}" onclick="window.py_refine_story('{uid}')">✨ Refine</button>
+                        <button class="btn-undo" id="btn-undo-{uid}" onclick="window.py_undo_refine('{uid}')">↩ Undo</button>
+                        <span id="refine-status-{uid}" style="font-size:11px; color:#666;"></span>
+                    </div>
+                </div>
+            """
+            document.getElementById("story-review-grid").appendChild(card)
+        
+        # Update count badge and collapse section
+        window.updateReviewCount()
+        document.getElementById("story-review-section").classList.add("collapsed")
+        
+        if success_count > 0: notify(f"Successfully fetched {success_count} stories. Expand to review & edit.", "success")
+        else: notify("No stories fetched.", "warn")
+
+    except Exception as e: 
+        notify("Network Error during Fetch.", "error")
+        log(f"Fetch Exception: {str(e)}", "error")
+    finally: btn.disabled = False; btn.innerText = "Fetch & Edit"
+
+async def py_generate_from_review(*args):
+    btn = document.getElementById("btn-gen-review")
+    btn.disabled = True; btn.innerText = "Processing..."
+    grid = document.getElementById("ai-grid")
+    
+    try:
+        # Get only checked stories
+        checked_boxes = document.querySelectorAll(".review-story-check:checked")
+        instr = document.getElementById("sys_instruction").value.strip() or DEFAULT_INSTRUCTION
+        
+        if len(checked_boxes) == 0:
+            notify("No stories selected. Check at least one story.", "warn"); return
+
+        # Collect story IDs being regenerated
+        story_ids_to_regenerate = set()
+        for checkbox in checked_boxes:
+            uid = checkbox.getAttribute("data-uid")
+            if uid in REVIEW_STAGED:
+                story_ids_to_regenerate.add(str(REVIEW_STAGED[uid].get('id', '')))
+        
+        # Remove old TCs for these stories from STAGED
+        uids_to_remove = []
+        for tc_uid, tc_data in STAGED.items():
+            if str(tc_data.get('story_id', '')) in story_ids_to_regenerate:
+                uids_to_remove.append(tc_uid)
+        
+        if uids_to_remove:
+            log(f"Clearing {len(uids_to_remove)} old TC(s) for stories: {story_ids_to_regenerate}", "info")
+            for tc_uid in uids_to_remove:
+                del STAGED[tc_uid]
+            # Re-render to clear old TCs from UI
+            sync_staged_to_js()
+            window.renderGroupedTable("ai-grid", "ai")
+
+        # Build list of independent tasks - each story gets its own separate AI call
+        tasks = []
+        for checkbox in checked_boxes:
+            uid = checkbox.getAttribute("data-uid")
+            if uid not in REVIEW_STAGED: continue
+            meta = REVIEW_STAGED[uid]
+            
+            # Get CURRENT text from contenteditable divs (might be refined/edited)
+            html_desc = document.getElementById(f"desc-{uid}").innerHTML
+            html_ac = document.getElementById(f"ac-{uid}").innerHTML
+            txt_desc, _ = extract_text_and_images(html_desc)  # Text from current (possibly refined)
+            txt_ac, _ = extract_text_and_images(html_ac)
+            
+            # Get ORIGINAL images from REVIEW_STAGED (never lost even after refinement)
+            original_desc = meta.get('desc', '')
+            original_ac = meta.get('ac', '')
+            _, original_imgs_desc = extract_text_and_images(original_desc)
+            _, original_imgs_ac = extract_text_and_images(original_ac)
+            all_original_images = original_imgs_desc + original_imgs_ac
+            
+            log(f"Story {meta['id']}: original_desc has {'images' if 'base64' in original_desc else 'NO images'}", "debug")
+            log(f"Story {meta['id']}: Extracted {len(original_imgs_desc)} desc + {len(original_imgs_ac)} AC = {len(all_original_images)} total images", "debug")
+            
+            if all_original_images:
+                log(f"Story {meta['id']}: Using {len(all_original_images)} original image(s)", "debug")
+            
+            # Each story gets: refined/edited TEXT + original IMAGES + both versions for modal
+            tasks.append(call_ai_and_render(txt_desc, txt_ac, all_original_images, instr, meta, html_desc, html_ac, original_desc, original_ac))
+        
+        # Fire all independent calls in parallel - each maintains separate context
+        log(f"Firing {len(tasks)} parallel AI calls (each story isolated)...", "info")
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Check for any failures
+        failures = [r for r in results if isinstance(r, Exception)]
+        if failures:
+            log(f"{len(failures)} story(s) failed to generate", "warn")
+        
+        notify("Generation Complete", "success")
+    except Exception as e: 
+        notify("Generation failed.", "error")
+        log(f"Gen Error: {str(e)}", "error")
+    finally: btn.disabled = False; btn.innerText = "🚀 Generate Selected"
+
+# ----- Refine Requirement Agent -----
+REFINE_SCHEMA = {
+    "name": "refined_story",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            "description": {"type": "string", "description": "The refined description text"},
+            "acceptance_criteria": {"type": "string", "description": "The refined acceptance criteria text"}
+        },
+        "required": ["description", "acceptance_criteria"],
+        "additionalProperties": False
+    }
+}
+
+REFINE_PROMPT = """You are a Technical Writer. Your ONLY job is to rewrite the user story for CLARITY - not to expand it.
+
+STRICT RULES:
+1. PRESERVE the original intent and scope - do NOT add new requirements
+2. Keep output length within ±20% of the original - be CONCISE
+3. Use simple, clear language - remove jargon and ambiguity
+4. DO NOT add test cases, edge cases, or scenarios that weren't in the original
+5. DO NOT add "Given/When/Then" format unless it was already there
+6. Fix grammar and improve readability only
+7. Keep bullet points if original had them, keep paragraphs if original had paragraphs
+
+{user_guidance}
+
+IMPORTANT: If user guidance is provided above, incorporate it while still following the rules. Your goal is CLARITY, not EXPANSION.
+
+Return a JSON object with "description" and "acceptance_criteria" fields."""
+
+def build_ai_request(system_prompt, content_blocks, schema, provider=None):
+    """Build AI request URL, headers, and body based on provider.
+    Returns (url, headers, body) tuple.
+    For Responses API, schema is converted to text.format structure.
+    """
+    if provider is None:
+        provider = document.getElementById('ai_provider').value
+    
+    if provider == "azure":
+        ai_end = document.getElementById('ai_endpoint').value.strip().rstrip('/')
+        ai_dep = document.getElementById('ai_deployment').value.strip()
+        ai_ver = document.getElementById('ai_version').value.strip()
+        url = f"{ai_end}/openai/deployments/{ai_dep}/chat/completions?api-version={ai_ver}"
+        headers = {"api-key": document.getElementById("ai_key").value, "Content-Type": "application/json"}
+        msgs = [{"role": "system", "content": system_prompt}, {"role": "user", "content": content_blocks}]
+        body = {"messages": msgs, "response_format": {"type": "json_schema", "json_schema": schema}}
+        log(f"POST Azure OpenAI: {ai_dep}", "debug")
+        return (url, headers, body)
+    
+    elif provider == "openai":
+        openai_base = document.getElementById("openai_base_url").value.strip().rstrip('/')
+        openai_key = document.getElementById("openai_key").value.strip()
+        openai_model = document.getElementById("openai_model").value.strip()
+        url = f"{openai_base}/chat/completions"
+        headers = {"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"}
+        msgs = [{"role": "system", "content": system_prompt}, {"role": "user", "content": content_blocks}]
+        body = {"model": openai_model, "messages": msgs, "response_format": {"type": "json_schema", "json_schema": schema}}
+        log(f"POST OpenAI Chat Completions: {openai_model}", "debug")
+        return (url, headers, body)
+    
+    elif provider == "responses":
+        responses_base = document.getElementById("responses_base_url").value.strip().rstrip('/')
+        responses_key = document.getElementById("responses_key").value.strip()
+        responses_model = document.getElementById("responses_model").value.strip()
+        url = f"{responses_base}/responses"
+        headers = {"Authorization": f"Bearer {responses_key}", "Content-Type": "application/json"}
+        
+        # Convert content_blocks to Responses API message format
+        # Responses API uses: input = [{ type: "message", role: "user", content: [...] }]
+        message_content = []
+        for block in content_blocks:
+            if block.get("type") == "text":
+                message_content.append({"type": "input_text", "text": block["text"]})
+            elif block.get("type") == "image_url":
+                message_content.append({"type": "input_image", "image_url": block["image_url"]["url"]})
+        
+        # Wrap content in a user message
+        input_message = {
+            "type": "message",
+            "role": "user",
+            "content": message_content
+        }
+        
+        # Responses API uses text.format for structured output
+        body = {
+            "model": responses_model,
+            "instructions": system_prompt,
+            "input": [input_message],
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": schema.get("name", "response"),
+                    "strict": schema.get("strict", True),
+                    "schema": schema.get("schema", schema)
+                }
+            }
+        }
+        log(f"POST OpenAI Responses API: {responses_model}", "debug")
+        return (url, headers, body)
+    
+    else:
+        raise ValueError(f"Unknown provider: {provider}")
+
+def parse_ai_response(response_data, provider=None):
+    """Parse AI response content based on provider format.
+    Returns the raw content string (JSON).
+    """
+    if provider is None:
+        provider = document.getElementById('ai_provider').value
+    
+    if provider == "responses":
+        # Responses API: find message item (skip reasoning items for o-series/gpt-5)
+        output = response_data.get("output", [])
+        for item in output:
+            if item.get("type") == "message":
+                content = item.get("content", [])
+                for c in content:
+                    if c.get("type") == "output_text":
+                        return c.get("text", "")
+        return ""
+    else:
+        # Chat Completions format: choices[0].message.content
+        return response_data['choices'][0]['message']['content']
+
+async def py_refine_story(uid, *args):
+    """Refine a story's description and AC using AI with strict schema"""
+    btn = document.getElementById(f"btn-refine-{uid}")
+    undo_btn = document.getElementById(f"btn-undo-{uid}")
+    status = document.getElementById(f"refine-status-{uid}")
+    desc_box = document.getElementById(f"desc-{uid}")
+    ac_box = document.getElementById(f"ac-{uid}")
+    
+    if not btn or not desc_box or not ac_box: return
+    
+    btn.disabled = True
+    btn.innerText = "⏳ Refining..."
+    status.innerText = ""
+    
+    try:
+        # Validate AI config
+        if validate_config():
+            status.innerText = "⚠️ Check AI settings"
+            return
+        
+        # Get current content (might be user-edited)
+        current_desc_html = desc_box.innerHTML
+        current_ac_html = ac_box.innerHTML
+        
+        # Extract text and images from the HTML content
+        txt_desc, imgs_desc = extract_text_and_images(current_desc_html)
+        txt_ac, imgs_ac = extract_text_and_images(current_ac_html)
+        
+        # ALSO get images from ORIGINAL content (in case current is refined text without images)
+        if uid in REVIEW_STAGED:
+            original_desc = REVIEW_STAGED[uid].get('desc', '')
+            original_ac = REVIEW_STAGED[uid].get('ac', '')
+            _, orig_imgs_desc = extract_text_and_images(original_desc)
+            _, orig_imgs_ac = extract_text_and_images(original_ac)
+            # Merge: use original images if current doesn't have any
+            if not imgs_desc and orig_imgs_desc:
+                imgs_desc = orig_imgs_desc
+            if not imgs_ac and orig_imgs_ac:
+                imgs_ac = orig_imgs_ac
+        
+        if not txt_desc.strip() and not txt_ac.strip():
+            status.innerText = "⚠️ Nothing to refine"
+            return
+        
+        # Get story title from REVIEW_STAGED
+        story_title = REVIEW_STAGED[uid].get('title', '') if uid in REVIEW_STAGED else ''
+        
+        # Get user's refinement hint
+        hint_input = document.getElementById(f"refine-hint-{uid}")
+        user_hint = hint_input.value.strip() if hint_input else ""
+        
+        # Build the prompt with user guidance
+        user_guidance = f"ADDITIONAL USER GUIDANCE: {user_hint}" if user_hint else ""
+        final_prompt = REFINE_PROMPT.replace("{user_guidance}", user_guidance)
+        
+        # Build AI request with multimodal content
+        content_blocks = [{"type": "text", "text": f"STORY TITLE: {story_title}\n\nDescription:\n{txt_desc}\n\nAcceptance Criteria:\n{txt_ac}"}]
+        
+        # Add images from description and AC
+        all_images = imgs_desc + imgs_ac
+        if all_images:
+            log(f"Including {len(all_images)} image(s) from story in refine request", "debug")
+            for img in all_images:
+                content_blocks.append({"type": "image_url", "image_url": {"url": img}})
+        
+        # Add uploaded context text (helps LLM understand domain/terminology)
+        if window.UPLOADED_CONTEXT.text:
+            content_blocks.append({"type": "text", "text": f"\nREFERENCE CONTEXT:\n{window.UPLOADED_CONTEXT.text}"})
+            log("Including uploaded text context in refine request", "debug")
+        
+        # Add uploaded images from file attachments
+        uploaded_images = list(window.UPLOADED_CONTEXT.images)
+        if uploaded_images:
+            log(f"Including {len(uploaded_images)} uploaded image(s) in refine request", "debug")
+            for img in uploaded_images:
+                content_blocks.append({"type": "image_url", "image_url": {"url": str(img)}})
+        
+        # Build request using helper (handles all 3 providers)
+        provider = document.getElementById('ai_provider').value
+        ai_url, ai_headers, payload = build_ai_request(final_prompt, content_blocks, REFINE_SCHEMA, provider)
+        
+        res = await pyfetch(ai_url, method="POST", headers=ai_headers, body=json.dumps(payload))
+        
+        if not res.ok:
+            txt = await res.text()
+            log(f"Refine API error: {txt}", "error")
+            status.innerText = "⚠️ AI error"
+            return
+        
+        data = await res.json()
+        raw_content = parse_ai_response(data, provider)
+        
+        # Parse JSON response (schema enforced, but still handle gracefully)
+        try:
+            result = json.loads(raw_content)
+            new_desc = result.get("description", txt_desc)
+            new_ac = result.get("acceptance_criteria", txt_ac)
+            
+            # Apply refined content
+            desc_box.innerHTML = new_desc.replace("\n", "<br>")
+            ac_box.innerHTML = new_ac.replace("\n", "<br>")
+            
+            # Store refined content for toggle
+            if uid not in REFINED_CONTENT:
+                REFINED_CONTENT[uid] = {}
+            REFINED_CONTENT[uid]['desc'] = new_desc.replace("\n", "<br>")
+            REFINED_CONTENT[uid]['ac'] = new_ac.replace("\n", "<br>")
+            
+            # Mark as refined
+            desc_box.classList.add("refined")
+            ac_box.classList.add("refined")
+            
+            # Show undo button and view toggle
+            undo_btn.classList.add("visible")
+            toggle_el = document.getElementById(f"card-view-toggle-{uid}")
+            if toggle_el:
+                toggle_el.classList.add("visible")
+            
+            # Update status - show hint was used if provided
+            if user_hint:
+                status.innerText = f"✓ Refined (with hint)"
+            else:
+                status.innerText = "✓ Refined"
+            log(f"Refined story {uid}" + (f" with hint: {user_hint[:30]}..." if user_hint else ""), "info")
+            
+        except Exception as parse_err:
+            log(f"Failed to parse refine response: {str(parse_err)}\nRaw: {raw_content[:200]}", "error")
+            status.innerText = "⚠️ Parse error"
+    
+    except Exception as e:
+        log(f"Refine error: {str(e)}", "error")
+        status.innerText = "⚠️ Error"
+    finally:
+        btn.disabled = False
+        # Show different text if already refined (iterating)
+        if desc_box.classList.contains("refined"):
+            btn.innerText = "🔄 Refine Again"
+        else:
+            btn.innerText = "✨ Refine"
+
+def py_undo_refine(uid, *args):
+    """Restore original fetched content from REVIEW_STAGED"""
+    if uid not in REVIEW_STAGED:
+        log(f"No original data for {uid}", "warn")
+        return
+    
+    desc_box = document.getElementById(f"desc-{uid}")
+    ac_box = document.getElementById(f"ac-{uid}")
+    undo_btn = document.getElementById(f"btn-undo-{uid}")
+    status = document.getElementById(f"refine-status-{uid}")
+    
+    if not desc_box or not ac_box: return
+    
+    # Restore original content
+    original = REVIEW_STAGED[uid]
+    desc_box.innerHTML = original.get("desc", "")
+    ac_box.innerHTML = original.get("ac", "")
+    
+    # Remove refined styling
+    desc_box.classList.remove("refined")
+    ac_box.classList.remove("refined")
+    
+    # Hide undo button and view toggle
+    undo_btn.classList.remove("visible")
+    toggle_el = document.getElementById(f"card-view-toggle-{uid}")
+    if toggle_el:
+        toggle_el.classList.remove("visible")
+    
+    # Clear refined content
+    if uid in REFINED_CONTENT:
+        del REFINED_CONTENT[uid]
+    
+    # Reset button text
+    btn = document.getElementById(f"btn-refine-{uid}")
+    if btn:
+        btn.innerText = "✨ Refine"
+    
+    status.innerText = "↩ Restored"
+    log(f"Restored original content for {uid}", "info")
+
+def py_show_original_in_card(uid, *args):
+    """Show original content in card (read-only view)"""
+    if uid not in REVIEW_STAGED:
+        return
+    
+    desc_box = document.getElementById(f"desc-{uid}")
+    ac_box = document.getElementById(f"ac-{uid}")
+    
+    if not desc_box or not ac_box: return
+    
+    original = REVIEW_STAGED[uid]
+    desc_box.innerHTML = original.get("desc", "")
+    ac_box.innerHTML = original.get("ac", "")
+
+def py_show_refined_in_card(uid, *args):
+    """Show refined content in card (editable)"""
+    if uid not in REFINED_CONTENT:
+        # No refined content, show original
+        if uid in REVIEW_STAGED:
+            desc_box = document.getElementById(f"desc-{uid}")
+            ac_box = document.getElementById(f"ac-{uid}")
+            if desc_box and ac_box:
+                original = REVIEW_STAGED[uid]
+                desc_box.innerHTML = original.get("desc", "")
+                ac_box.innerHTML = original.get("ac", "")
+        return
+    
+    desc_box = document.getElementById(f"desc-{uid}")
+    ac_box = document.getElementById(f"ac-{uid}")
+    
+    if not desc_box or not ac_box: return
+    
+    refined = REFINED_CONTENT[uid]
+    desc_box.innerHTML = refined.get("desc", "")
+    ac_box.innerHTML = refined.get("ac", "")
+
+def py_save_refined_edits(uid, desc_html, ac_html, *args):
+    """Save user's manual edits to refined content"""
+    if uid in REFINED_CONTENT:
+        REFINED_CONTENT[uid]['desc'] = desc_html
+        REFINED_CONTENT[uid]['ac'] = ac_html
+
+async def py_generate(*args):
+    # Validation
+    raw_ids = document.getElementById("story_ids").value
+    if not raw_ids.strip(): notify("Enter Story IDs.", "warn"); return
+    if validate_config(): notify("Check Settings.", "error"); return
+
+    btn = document.getElementById("btn-generate")
+    btn.disabled = True
+    grid = document.getElementById("ai-grid")
+    
+    try:
+        pat = document.getElementById("ado_pat").value.strip()
+        auth = base64.b64encode(f":{pat}".encode("ascii")).decode("ascii")
+        headers = {"Authorization": f"Basic {auth}", "Content-Type": "application/json"}
+        ids = [x.strip() for x in raw_ids.split(',') if x.strip()]
+        instr = document.getElementById("sys_instruction").value.strip() or DEFAULT_INSTRUCTION
+        base = document.getElementById("ado_url").value.strip().rstrip('/'); proj = document.getElementById("ado_project").value.strip()
+
+        # Clear old TCs for these story IDs before generating new ones
+        story_ids_to_regenerate = set(ids)
+        uids_to_remove = []
+        for tc_uid, tc_data in STAGED.items():
+            if str(tc_data.get('story_id', '')) in story_ids_to_regenerate:
+                uids_to_remove.append(tc_uid)
+        
+        if uids_to_remove:
+            log(f"Clearing {len(uids_to_remove)} old TC(s) for stories: {story_ids_to_regenerate}", "info")
+            for tc_uid in uids_to_remove:
+                del STAGED[tc_uid]
+            sync_staged_to_js()
+            window.renderGroupedTable("ai-grid", "ai")
+
+        log(f"Direct generating {len(ids)} items...", "info")
+        
+        # Phase 1: Fetch all stories in parallel (ADO API calls)
+        async def fetch_story(sid):
+            res = await pyfetch(f"{base}/{proj}/_apis/wit/workItems/{sid}?api-version=7.1", method="GET", headers=headers)
+            if not res.ok: 
+                log(f"Error fetching {sid}", "error")
+                return None
+            story = await res.json()
+            raw_desc = story['fields'].get('System.Description', '')
+            raw_ac = story['fields'].get('Microsoft.VSTS.Common.AcceptanceCriteria', '')
+            proc_desc = await inline_ado_images(raw_desc, base, auth)
+            proc_ac = await inline_ado_images(raw_ac, base, auth)
+            
+            return {
+                "sid": sid,
+                "meta": {
+                    "id": sid, "title": story['fields'].get('System.Title', 'Untitled'),
+                    "url": story['url'], "area": story['fields'].get("System.AreaPath"), "iter": story['fields'].get("System.IterationPath"),
+                    "base": base, "proj": proj, "auth": auth 
+                },
+                "proc_desc": proc_desc, "proc_ac": proc_ac
+            }
+        
+        log(f"Fetching {len(ids)} stories from ADO...", "info")
+        fetch_results = await asyncio.gather(*[fetch_story(sid) for sid in ids], return_exceptions=True)
+        stories = [s for s in fetch_results if s and not isinstance(s, Exception)]
+        
+        if not stories:
+            notify("No stories fetched successfully.", "error")
+            return
+        
+        # Phase 2: Generate TCs in parallel - each story gets its OWN separate AI call with isolated context
+        tasks = []
+        for story_data in stories:
+            txt_desc, imgs_desc = extract_text_and_images(story_data["proc_desc"])
+            txt_ac, imgs_ac = extract_text_and_images(story_data["proc_ac"])
+            # Each story gets its own isolated API call - no context mixing
+            tasks.append(call_ai_and_render(txt_desc, txt_ac, imgs_desc+imgs_ac, instr, story_data["meta"], story_data["proc_desc"], story_data["proc_ac"]))
+        
+        log(f"Firing {len(tasks)} parallel AI calls (each story isolated)...", "info")
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Check for any failures
+        failures = [r for r in results if isinstance(r, Exception)]
+        if failures:
+            log(f"{len(failures)} story(s) failed to generate", "warn")
+        
+        notify("Generation Complete", "success")
+    except Exception as e: log(f"Error: {str(e)}", "error")
+    finally: btn.disabled = False
+
+async def call_ai_and_render(desc_text, ac_text, story_images, instr, meta, display_desc, display_ac, original_desc=None, original_ac=None):
+    content_blocks = [{"type":"text", "text": f"TARGET STORY: {meta['title']}\nDesc: {desc_text}\nAC: {ac_text}"}]
+    
+    # Add images from story (ADO inline images)
+    if story_images:
+        for img in story_images: content_blocks.append({"type":"image_url", "image_url":{"url":img}})
+    
+    # Add uploaded context text
+    if window.UPLOADED_CONTEXT.text:
+        content_blocks.append({"type":"text", "text": f"\nCTX: {window.UPLOADED_CONTEXT.text}"})
+    
+    # Add uploaded images from file attachments
+    uploaded_images = list(window.UPLOADED_CONTEXT.images)
+    if uploaded_images:
+        log(f"Adding {len(uploaded_images)} uploaded image(s) to context", "debug")
+        for img in uploaded_images:
+            content_blocks.append({"type":"image_url", "image_url":{"url": str(img)}})
+
+    # Build request using helper (handles all 3 providers)
+    provider = document.getElementById('ai_provider').value
+    ai_url, ai_headers, request_body = build_ai_request(instr, content_blocks, STRICT_SCHEMA, provider)
+    
+    total_images = len(story_images) + len(uploaded_images)
+    log(f"Payload Size: {len(json.dumps(request_body))} chars. Images: {total_images} (story: {len(story_images)}, uploaded: {len(uploaded_images)})", "debug")
+
+    try:
+        ai_res = await pyfetch(ai_url, method="POST", headers=ai_headers, body=json.dumps(request_body))
+
+        if ai_res.ok:
+            data = await ai_res.json()
+            raw_content = parse_ai_response(data, provider)
+            tcs = json.loads(raw_content)['testCases']
+            log(f"Generated {len(tcs)} TCs for {meta['id']}", "success")
+            
+            for tc in tcs:
+                uid = str(uuid.uuid4())
+                confidence = tc.get('confidence', 75)
+                STAGED[uid] = {
+                    "title": tc['description'], "steps": tc['steps'], "ado_id": None,
+                    "story_id": meta['id'], "story_title": meta['title'], 
+                    "story_desc": display_desc, "story_ac": display_ac,
+                    "original_desc": original_desc, "original_ac": original_ac,  # Store original for modal toggle
+                    "meta": meta, "confidence": confidence, "_source": "ai"
+                }
+            
+            # Sync to JS and re-render table
+            sync_staged_to_js()
+            window.renderGroupedTable("ai-grid", "ai")
+        else: 
+            err = await ai_res.string()
+            log(f"AI Error ({ai_res.status}): {err[:150]}", "error")
+            notify(f"AI Error {ai_res.status}. Check Console.", "error")
+    except Exception as e: log(f"AI Error: {str(e)}", "error")
+
+def sync_staged_to_js():
+    """Sync Python STAGED dict to JS window.STAGED_DATA for rendering"""
+    # Convert STAGED to JSON and parse in JS to avoid JsProxy issues
+    staged_for_js = {}
+    for uid, tc in STAGED.items():
+        staged_for_js[uid] = {
+            "title": tc.get('title', ''),
+            "story_id": tc.get('story_id', ''),
+            "story_title": tc.get('story_title', ''),
+            "story_desc": tc.get('story_desc', ''),
+            "story_ac": tc.get('story_ac', ''),
+            "original_desc": tc.get('original_desc', ''),
+            "original_ac": tc.get('original_ac', ''),
+            "confidence": tc.get('confidence', 0),
+            "_source": tc.get('_source', 'manual'),
+            "steps": tc.get('steps', [])
+        }
+    window.STAGED_DATA = window.JSON.parse(json.dumps(staged_for_js))
+
+# --- MANUAL UPLOAD LOGIC ---
+async def py_parse_manual_csv(file_input):
+    files = file_input.files
+    if not files: return
+    file = files.item(0)
+    text = await file.text()
+    
+    REQUIRED = ['Story ID', 'Name', 'Action', 'Expected Result']
+    
+    try:
+        f = io.StringIO(text)
+        reader = csv.reader(f)
+        headers = next(reader, None)
+        
+        if not headers or headers[:4] != REQUIRED:
+            log("CSV Headers mismatch. Must be: Story ID, Name, Action, Expected Result", "error")
+            notify("Invalid Headers. Must match Export format.", "error"); return
+
+        # Clear existing manual items from STAGED
+        manual_uids = [uid for uid, tc in STAGED.items() if tc.get('_source') == 'manual']
+        for uid in manual_uids:
+            del STAGED[uid]
+        
+        current_tc = None
+        
+        # We need current settings to enable push for manual items
+        base = document.getElementById("ado_url").value.strip().rstrip('/')
+        proj = document.getElementById("ado_project").value.strip()
+        pat = document.getElementById("ado_pat").value.strip()
+        auth = ""
+        if pat: auth = base64.b64encode(f":{pat}".encode("ascii")).decode("ascii")
+
+        def finalize_tc(tc_data):
+            if not tc_data: return
+            uid = str(uuid.uuid4())
+            STAGED[uid] = {
+                "title": tc_data['title'], "steps": tc_data['steps'], "story_id": tc_data['story_id'], "ado_id": None,
+                "story_title": "Manual Import", "story_desc": "", "story_ac": "",
+                "meta": {"base":base, "proj":proj, "auth":auth, "url": "", "area":"", "iter":""},
+                "_source": "manual", "confidence": 0
+            }
+
+        for row in reader:
+            if not row: continue 
+            s_id, name, action, exp = row[0], row[1], row[2], row[3]
+            
+            if name: 
+                finalize_tc(current_tc)
+                current_tc = {"story_id": s_id, "title": name, "steps": []}
+                if action or exp: current_tc['steps'].append({"action": action, "expectedResult": exp})
+            elif action or exp: 
+                if current_tc: current_tc['steps'].append({"action": action, "expectedResult": exp})
+        
+        finalize_tc(current_tc)
+        
+        # Sync to JS and render table
+        sync_staged_to_js()
+        window.renderGroupedTable("manual-grid", "manual")
+        
+        notify("CSV Parsed successfully.", "success")
+        
+    except Exception as e: 
+        log(f"CSV Parse Error: {str(e)}", "error")
+        notify("Failed to parse CSV.", "error")
+
+# --- SHARED: PUSH, MODAL, CSV EXPORT ---
+# Track current modal UID globally for link/unlink operations
+CURRENT_MODAL_UID = None
+
+def update_modal_link_ui(is_linked, story_id=None):
+    """Update the modal UI to reflect linked/unlinked state"""
+    unlinked_div = document.getElementById("modal-link-unlinked")
+    linked_div = document.getElementById("modal-link-linked")
+    ref_placeholder = document.getElementById("ref-placeholder")
+    ref_content = document.getElementById("ref-content-container")
+    ai_badge = document.getElementById("ai-mode-badge")
+    
+    if is_linked:
+        unlinked_div.style.display = "none"
+        linked_div.style.display = "flex"
+        document.getElementById("modal-linked-story-label").innerText = f"Linked: #{story_id}"
+        ref_placeholder.style.display = "none"
+        ref_content.style.display = "block"
+        # Validator Mode
+        ai_badge.className = "ai-mode-indicator ai-mode-validator"
+        ai_badge.innerText = "🔍 Validator Mode"
+    else:
+        unlinked_div.style.display = "flex"
+        linked_div.style.display = "none"
+        document.getElementById("modal-link-story-id").value = ""
+        ref_placeholder.style.display = "block"
+        ref_content.style.display = "none"
+        # Editor Mode
+        ai_badge.className = "ai-mode-indicator ai-mode-editor"
+        ai_badge.innerText = "✏️ Editor Mode"
+
+def update_row_link_status(uid):
+    """Update the row status badge to reflect linked/unlinked status"""
+    if uid not in STAGED:
+        return
+    data = STAGED[uid]
+    row = document.getElementById(f"row-{uid}")
+    if not row:
+        return
+    status_cell = row.querySelector(".tc-row-status")
+    if status_cell:
+        is_linked = bool(data.get('story_desc') or data.get('story_ac'))
+        if is_linked:
+            status_cell.innerHTML = '<span class="status-badge linked">🔗 Linked</span>'
+        else:
+            source = data.get('_source', 'manual')
+            if source == 'ai':
+                status_cell.innerHTML = '<span class="status-badge ai">🤖 AI</span>'
+            else:
+                status_cell.innerHTML = '<span class="status-badge manual">📝 Manual</span>'
+    
+    # Sync to JS
+    sync_staged_to_js()
+
+def py_populate_modal(uid):
+    global CURRENT_MODAL_UID
+    CURRENT_MODAL_UID = uid
+    
+    if uid not in STAGED: return
+    data = STAGED[uid]
+    document.getElementById("modal-title").value = data['title']
+    tbody = document.getElementById("modal-steps-body"); tbody.innerHTML = ""
+    for s in data['steps']:
+        row = document.createElement("tr")
+        row.innerHTML = f'<td contenteditable="true">{s["action"]}</td><td contenteditable="true">{s["expectedResult"]}</td><td>{window.CTRL_BTNS}</td>'
+        tbody.appendChild(row)
+    
+    # Check if this TC is linked to a story
+    is_linked = bool(data.get('story_desc') or data.get('story_ac'))
+    
+    if is_linked:
+        # Linked state - show story content
+        document.getElementById("story-title-display").innerText = f"Story {data['story_id']}: {data['story_title']}"
+        document.getElementById("story-desc-display").innerHTML = data.get('story_desc', '')
+        document.getElementById("story-ac-display").innerHTML = data.get('story_ac', '')
+        update_modal_link_ui(True, data.get('story_id', 'N/A'))
+        
+        # Set up toggle data - use stored original content if available
+        orig_desc = data.get('original_desc', '')
+        orig_ac = data.get('original_ac', '')
+        
+        # Fallback: Try to find original in REVIEW_STAGED if not stored
+        if not orig_desc and not orig_ac:
+            story_id = str(data.get('story_id', ''))
+            for key, staged_data in REVIEW_STAGED.items():
+                if str(staged_data.get('id', '')) == story_id:
+                    orig_desc = staged_data.get('desc', '')
+                    orig_ac = staged_data.get('ac', '')
+                    break
+        
+        # Store generated version (what was used for TC generation)
+        window.MODAL_STORY_DATA.generated.desc = data.get('story_desc', '')
+        window.MODAL_STORY_DATA.generated.ac = data.get('story_ac', '')
+        
+        # Check if we have original content AND it differs from generated
+        has_different_original = orig_desc and (orig_desc != data.get('story_desc', '') or orig_ac != data.get('story_ac', ''))
+        
+        if has_different_original:
+            # Story was refined - show toggle with both versions
+            window.MODAL_STORY_DATA.original.desc = orig_desc
+            window.MODAL_STORY_DATA.original.ac = orig_ac
+            window.MODAL_STORY_DATA.hasOriginal = True
+            document.getElementById("story-view-toggle").style.display = "flex"
+            document.getElementById("btn-view-generated").innerText = "📝 Refined"
+            document.getElementById("btn-view-original").innerText = "📋 Original (ADO)"
+            document.getElementById("btn-refetch-original").style.display = "none"
+        else:
+            # No refinement data - hide toggle, show re-fetch button
+            window.MODAL_STORY_DATA.hasOriginal = False
+            document.getElementById("story-view-toggle").style.display = "none"
+            # Show re-fetch button so user can get original from ADO
+            document.getElementById("btn-refetch-original").style.display = "inline-block"
+        
+        # Reset to "Generated From" view
+        document.getElementById("btn-view-generated").classList.add("active")
+        document.getElementById("btn-view-original").classList.remove("active")
+        document.getElementById("original-indicator").classList.remove("visible")
+    else:
+        # Unlinked state - show placeholder
+        document.getElementById("story-title-display").innerText = ""
+        document.getElementById("story-desc-display").innerHTML = ""
+        document.getElementById("story-ac-display").innerHTML = ""
+        document.getElementById("story-view-toggle").style.display = "none"
+        window.MODAL_STORY_DATA.hasOriginal = False
+        update_modal_link_ui(False)
+        
+        # Auto-populate suggested story ID if available (but don't auto-fetch)
+        suggested_story_id = data.get('story_id', '')
+        if suggested_story_id and suggested_story_id != 'MANUAL':
+            document.getElementById("modal-link-story-id").value = suggested_story_id
+            document.getElementById("modal-link-story-id").style.background = "#fff4ce"  # Highlight as suggestion
+
+    # Show confidence badge
+    confidence = data.get('confidence', 0)
+    conf_el = document.getElementById("modal-confidence")
+    if confidence > 0:
+        conf_class = 'confidence-high' if confidence >= 80 else 'confidence-medium' if confidence >= 50 else 'confidence-low'
+        conf_el.className = f"confidence-badge {conf_class}"
+        conf_el.innerText = f"Confidence: {confidence}%"
+        conf_el.style.display = "inline-block"
+    else:
+        conf_el.style.display = "none"
+
+    # Clear regeneration hint
+    document.getElementById("regen-hint").value = ""
+
+    document.getElementById("btn-modal-push").dataset.uid = uid
+    document.getElementById("btn-modal-save").dataset.uid = uid
+    document.getElementById("btn-modal-csv").dataset.uid = uid
+    document.getElementById("btn-modal-regen").dataset.uid = uid
+    document.getElementById("modal-overlay").classList.add("active")
+
+def py_save_draft(uid):
+    if uid not in STAGED: return
+    new_title = document.getElementById("modal-title").value
+    steps = []
+    tbody = document.getElementById("modal-steps-body")
+    for row in tbody.querySelectorAll("tr"):
+        cells = row.querySelectorAll("td")
+        steps.append({"action": cells[0].innerText, "expectedResult": cells[1].innerText})
+    STAGED[uid]['title'] = new_title
+    STAGED[uid]['steps'] = steps
+    
+    # Update the table row
+    row = document.getElementById(f"row-{uid}")
+    if row:
+        title_el = row.querySelector(".tc-row-title")
+        if title_el: title_el.innerText = new_title
+        steps_el = row.querySelector(".tc-row-steps")
+        if steps_el: steps_el.innerText = str(len(steps))
+    
+    # Sync to JS
+    sync_staged_to_js()
+    notify("Draft saved locally.", "info")
+
+def py_delete_items(uids_proxy):
+    uids = [str(x) for x in uids_proxy]
+    count = 0
+    for uid in uids:
+        if uid in STAGED:
+            del STAGED[uid]
+            count += 1
+    log(f"Removed {count} items from Stage.", "info")
+
+async def py_bulk_push(uids_proxy):
+    if validate_config(): notify("Check Settings before pushing.", "error"); return
+    uids = [str(x) for x in uids_proxy]
+    notify(f"Pushing {len(uids)} items...", "info")
+    success = 0
+    for uid in uids: 
+        if await internal_push(uid): success += 1
+    
+    if success == len(uids): notify("All items pushed successfully!", "success")
+    else: notify(f"Pushed {success}/{len(uids)} items. Check logs for errors.", "warn")
+
+async def py_push_modal(uid):
+    if uid not in STAGED: return
+    if validate_config(): notify("Check Settings before pushing.", "error"); return
+    
+    py_save_draft(uid)
+    if await internal_push(uid):
+        notify("Pushed to ADO successfully!", "success")
+        document.getElementById("modal-overlay").classList.remove("active")
+    else:
+        notify("Push failed. Check console.", "error")
+
+async def internal_push(uid):
+    data = STAGED[uid]
+    meta = data['meta']
+    if not meta.get('auth'): log("Missing ADO credentials.", "error"); return False
+
+    title = data['title'][:250]
+    xml = ""
+    for i, s in enumerate(data['steps'], 2):
+        xml += f'<step id="{i}" type="ValidateStep"><parameterizedString isformatted="true">{s["action"].replace("<","&lt;")}</parameterizedString><parameterizedString isformatted="true">{s["expectedResult"].replace("<","&lt;")}</parameterizedString><description/></step>'
+    
+    patch = [
+        {"op":"add", "path":"/fields/System.Title", "value":title},
+        {"op":"add", "path":"/fields/Microsoft.VSTS.TCM.Steps", "value":f'<steps id="0" last="{len(data["steps"])+1}">{xml}</steps>'},
+    ]
+    if meta.get('area'): patch.append({"op":"add", "path":"/fields/System.AreaPath", "value":meta['area']})
+    if meta.get('iter'): patch.append({"op":"add", "path":"/fields/System.IterationPath", "value":meta['iter']})
+    if meta.get('url'): patch.append({"op":"add", "path":"/relations/-", "value": {"rel":"Microsoft.VSTS.Common.TestedBy-Reverse","url":meta['url'],"attributes":{"comment":"AI Agent"}}})
+    
+    url = f"{meta['base']}/{meta['proj']}/_apis/wit/workItems/$Test Case?api-version=7.1"
+    
+    log(f"POST ADO: {url}", "debug")
+    log(f"Patch Size: {len(json.dumps(patch))}", "debug")
+
+    try:
+        resp = await pyfetch(url, method="POST", headers={"Authorization":f"Basic {meta['auth']}", "Content-Type":"application/json-patch+json"}, body=json.dumps(patch))
+        if resp.ok:
+            d = await resp.json()
+            log(f"Created Test Case {d['id']}", "success")
+            STAGED[uid]['ado_id'] = d['id']
+            
+            # Update the table row
+            row = document.getElementById(f"row-{uid}")
+            if row:
+                row.classList.add("pushed")
+                title_el = row.querySelector(".tc-row-title")
+                if title_el: title_el.innerText = f"✔ #{d['id']}: {title}"
+            return True
+        else: 
+            err_txt = await resp.string()
+            log(f"ADO Error {resp.status}: {err_txt}", "error")
+            return False
+    except Exception as e: 
+        log(f"Push Failed: {str(e)}", "error")
+        return False
+
+def py_get_csv_content(uids_proxy):
+    uids = [str(x) for x in uids_proxy]
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['Story ID', 'Name', 'Action', 'Expected Result'])
+    for uid in uids:
+        if uid not in STAGED: continue
+        d = STAGED[uid]
+        title = d['title']; s_id = d['story_id']
+        for idx, s in enumerate(d['steps']):
+            if idx == 0: writer.writerow([s_id, title, s['action'], s['expectedResult']])
+            else: writer.writerow(['', '', s['action'], s['expectedResult']])
+        writer.writerow([])
+    return output.getvalue()
+
+async def py_regenerate_tc(uid):
+    """Regenerate a single test case with ADAPTIVE AI based on linked/unlinked state"""
+    if uid not in STAGED:
+        notify("Test case not found.", "error")
+        return
+    
+    data = STAGED[uid]
+    
+    if validate_config():
+        notify("Check Settings before regenerating.", "error")
+        return
+    
+    btn = document.getElementById("btn-modal-regen")
+    btn.disabled = True
+    btn.innerText = "⏳..."
+    
+    try:
+        # Get user hint for regeneration
+        user_hint = document.getElementById("regen-hint").value.strip()
+        current_title = document.getElementById("modal-title").value
+        
+        # Get current steps from the modal (user may have edited them)
+        current_steps = []
+        tbody = document.getElementById("modal-steps-body")
+        for row in tbody.querySelectorAll("tr"):
+            cells = row.querySelectorAll("td")
+            if len(cells) >= 2:
+                current_steps.append({
+                    "action": cells[0].innerText.strip(),
+                    "expectedResult": cells[1].innerText.strip()
+                })
+        
+        # Format current TC for context
+        current_tc_text = f"CURRENT TEST CASE:\nTitle: {current_title}\nSteps:\n"
+        for i, step in enumerate(current_steps, 1):
+            current_tc_text += f"  {i}. Action: {step['action']}\n     Expected: {step['expectedResult']}\n"
+        
+        # Check if linked to a story (AC 5 - Adaptive LLM Logic)
+        is_linked = bool(data.get('story_desc') or data.get('story_ac'))
+        
+        # Common schema instruction for both modes
+        schema_instruction = """
+OUTPUT FORMAT (STRICT JSON SCHEMA):
+Return EXACTLY ONE test case in this JSON structure:
+{
+  "testCase": {
+    "description": "<CLEAN TITLE ONLY - NO notes, NO explanations, just the test case title>",
+    "confidence": <number 0-100>,
+    "steps": [
+      {"action": "<step action>", "expectedResult": "<expected result>"},
+      ...
+    ]
+  }
+}
+
+CRITICAL RULES:
+- The "description" field must contain ONLY the test case title (e.g., "Verify user login with valid credentials")
+- Do NOT include notes, explanations, or validation comments in the description
+- Keep the SAME validation target/scope as the original test case
+"""
+
+        if is_linked:
+            # AC 5.2: LINKED STATE - Validator Mode
+            log("AI Mode: 🔍 Validator (Requirements-based)", "info")
+            
+            txt_desc, imgs_desc = extract_text_and_images(data.get('story_desc', ''))
+            txt_ac, imgs_ac = extract_text_and_images(data.get('story_ac', ''))
+            
+            regen_instr = f"""You are a QA Architect acting as a REQUIREMENTS VALIDATOR.
+Your job is to refine this EXISTING test case while validating it against the linked User Story requirements.
+
+VALIDATION RULES:
+1. Keep the SAME test scenario/validation target as the original
+2. Ensure test steps align with the Acceptance Criteria
+3. Verify expected results match the story requirements
+4. Apply the user's requested change while maintaining requirement coverage
+5. Do NOT change the fundamental purpose of the test case
+
+USER'S REQUESTED CHANGE: {user_hint if user_hint else 'Validate and improve alignment with requirements'}
+
+{schema_instruction}"""
+            
+            # Include story context in the prompt
+            content_blocks = [{
+                "type": "text", 
+                "text": f"USER STORY: {data.get('story_title', 'Unknown')}\n\nDESCRIPTION:\n{txt_desc}\n\nACCEPTANCE CRITERIA:\n{txt_ac}\n\n{current_tc_text}"
+            }]
+            
+            # Add images from story
+            all_images = imgs_desc + imgs_ac
+            for img in all_images:
+                content_blocks.append({"type": "image_url", "image_url": {"url": img}})
+            
+            # Add uploaded context (consistent with main generation)
+            if window.UPLOADED_CONTEXT.text:
+                content_blocks.append({"type": "text", "text": f"\nREFERENCE CONTEXT:\n{window.UPLOADED_CONTEXT.text}"})
+            uploaded_images = list(window.UPLOADED_CONTEXT.images)
+            for img in uploaded_images:
+                content_blocks.append({"type": "image_url", "image_url": {"url": str(img)}})
+        else:
+            # AC 5.1: UNLINKED STATE - Editor Mode
+            log("AI Mode: ✏️ Editor (Grammar/Clarity)", "info")
+            
+            regen_instr = f"""You are a QA Editor focused on GRAMMAR and CLARITY.
+Your job is to refine this EXISTING test case for readability and consistency.
+
+EDITOR RULES:
+1. Keep the SAME test scenario/validation target as the original
+2. Fix grammar, spelling, and punctuation errors
+3. Improve clarity and readability of steps
+4. Ensure consistent formatting and terminology
+5. Make actions and expected results more precise
+6. Do NOT add new test scenarios or change the test scope
+
+USER'S REQUESTED CHANGE: {user_hint if user_hint else 'Improve grammar and clarity'}
+
+{schema_instruction}"""
+            
+            # Only include current TC (no story context)
+            content_blocks = [{
+                "type": "text", 
+                "text": current_tc_text
+            }]
+        
+        if user_hint:
+            log(f"Hint: {user_hint[:50]}...", "info")
+        
+        # Build request using helper (handles all 3 providers)
+        provider = document.getElementById('ai_provider').value
+        ai_url, ai_headers, request_body = build_ai_request(regen_instr, content_blocks, SINGLE_TC_SCHEMA, provider)
+        
+        log(f"Regenerating TC: {current_title[:50]}...", "info")
+        
+        ai_res = await pyfetch(ai_url, method="POST", headers=ai_headers, body=json.dumps(request_body))
+        
+        if ai_res.ok:
+            resp_data = await ai_res.json()
+            raw_content = parse_ai_response(resp_data, provider)
+            tc = json.loads(raw_content)['testCase']
+            
+            if tc:
+                new_confidence = tc.get('confidence', 75)
+                
+                # Update STAGED data
+                STAGED[uid]['title'] = tc['description']
+                STAGED[uid]['steps'] = tc['steps']
+                STAGED[uid]['confidence'] = new_confidence
+                
+                # Refresh the modal with new data
+                py_populate_modal(uid)
+                
+                # Update the table row
+                row = document.getElementById(f"row-{uid}")
+                if row:
+                    title_el = row.querySelector(".tc-row-title")
+                    if title_el: title_el.innerText = tc['description']
+                    
+                    steps_el = row.querySelector(".tc-row-steps")
+                    if steps_el: steps_el.innerText = str(len(tc['steps']))
+                    
+                    conf_class = 'confidence-high' if new_confidence >= 80 else 'confidence-medium' if new_confidence >= 50 else 'confidence-low'
+                    conf_el = row.querySelector(".tc-row-conf")
+                    if conf_el:
+                        conf_el.innerHTML = f'<span class="confidence-badge {conf_class}">{new_confidence}%</span>'
+                
+                # Sync to JS
+                sync_staged_to_js()
+                
+                mode_name = "Validator" if is_linked else "Editor"
+                notify(f"Refined ({mode_name} Mode) - {new_confidence}% confidence!", "success")
+                log(f"Regenerated: {tc['description'][:60]}...", "success")
+            else:
+                notify("AI returned no test cases.", "warn")
+        else:
+            err = await ai_res.string()
+            log(f"Regen Error ({ai_res.status}): {err[:150]}", "error")
+            notify("Regeneration failed. Check console.", "error")
+            
+    except Exception as e:
+        log(f"Regen Exception: {str(e)}", "error")
+        notify("Regeneration failed.", "error")
+    finally:
+        btn.disabled = False
+        btn.innerText = "Apply Fix"
+
+async def py_fetch_and_link_story():
+    """Fetch a story from ADO and link it to the current test case in modal (AC 2)"""
+    global CURRENT_MODAL_UID
+    
+    if not CURRENT_MODAL_UID or CURRENT_MODAL_UID not in STAGED:
+        notify("No test case selected.", "error")
+        return
+    
+    story_id = document.getElementById("modal-link-story-id").value.strip()
+    if not story_id:
+        notify("Please enter a Story ID.", "warn")
+        return
+    
+    if validate_config():
+        notify("Configure ADO Settings first.", "error")
+        return
+    
+    btn = document.getElementById("btn-modal-fetch-link")
+    btn.disabled = True
+    btn.innerText = "⏳..."
+    
+    try:
+        pat = document.getElementById("ado_pat").value.strip()
+        auth = base64.b64encode(f":{pat}".encode("ascii")).decode("ascii")
+        headers = {"Authorization": f"Basic {auth}", "Content-Type": "application/json"}
+        base = document.getElementById("ado_url").value.strip().rstrip('/')
+        proj = document.getElementById("ado_project").value.strip()
+        
+        url = f"{base}/{proj}/_apis/wit/workItems/{story_id}?api-version=7.1"
+        log(f"Fetching Story {story_id} for linking...", "info")
+        
+        res = await pyfetch(url, method="GET", headers=headers)
+        
+        if not res.ok:
+            if res.status == 401:
+                notify("Auth Failed. Check PAT.", "error")
+            elif res.status == 404:
+                notify(f"Story ID {story_id} not found.", "warn")
+            else:
+                notify(f"Error {res.status} fetching story.", "error")
+            return
+        
+        story = await res.json()
+        
+        # Process story content
+        raw_desc = story['fields'].get('System.Description', '')
+        raw_ac = story['fields'].get('Microsoft.VSTS.Common.AcceptanceCriteria', '')
+        proc_desc = await inline_ado_images(raw_desc, base, auth)
+        proc_ac = await inline_ado_images(raw_ac, base, auth)
+        story_title = story['fields'].get('System.Title', 'Untitled')
+        
+        # Update STAGED data with linked story
+        uid = CURRENT_MODAL_UID
+        STAGED[uid]['story_id'] = story_id
+        STAGED[uid]['story_title'] = story_title
+        STAGED[uid]['story_desc'] = proc_desc
+        STAGED[uid]['story_ac'] = proc_ac
+        STAGED[uid]['meta']['url'] = story.get('url', '')
+        STAGED[uid]['meta']['area'] = story['fields'].get('System.AreaPath', '')
+        STAGED[uid]['meta']['iter'] = story['fields'].get('System.IterationPath', '')
+        
+        # Update the modal UI (AC 2)
+        document.getElementById("story-title-display").innerText = f"Story {story_id}: {story_title}"
+        document.getElementById("story-desc-display").innerHTML = proc_desc
+        document.getElementById("story-ac-display").innerHTML = proc_ac
+        update_modal_link_ui(True, story_id)
+        
+        # Update the row status (AC 4)
+        update_row_link_status(uid)
+        
+        notify(f"Linked to Story #{story_id}", "success")
+        log(f"Linked TC to Story {story_id}: {story_title}", "success")
+        
+    except Exception as e:
+        notify("Failed to fetch story.", "error")
+        log(f"Link Error: {str(e)}", "error")
+    finally:
+        btn.disabled = False
+        btn.innerText = "🔗 Fetch"
+
+def py_unlink_story():
+    """Unlink the story from the current test case (AC 3)"""
+    global CURRENT_MODAL_UID
+    
+    if not CURRENT_MODAL_UID or CURRENT_MODAL_UID not in STAGED:
+        notify("No test case selected.", "error")
+        return
+    
+    uid = CURRENT_MODAL_UID
+    
+    # Clear story data from STAGED
+    STAGED[uid]['story_desc'] = ""
+    STAGED[uid]['story_ac'] = ""
+    STAGED[uid]['story_title'] = "Manual Test"
+    STAGED[uid]['meta']['url'] = ""
+    
+    # Update modal UI (AC 3)
+    document.getElementById("story-title-display").innerText = ""
+    document.getElementById("story-desc-display").innerHTML = ""
+    document.getElementById("story-ac-display").innerHTML = ""
+    update_modal_link_ui(False)
+    
+    # Update the row status (AC 4)
+    update_row_link_status(uid)
+    
+    notify("Story unlinked.", "info")
+    log(f"Unlinked TC from story.", "info")
+
+async def py_refetch_original_story():
+    """Re-fetch the original story from ADO to compare with refined version"""
+    global CURRENT_MODAL_UID
+    
+    if not CURRENT_MODAL_UID or CURRENT_MODAL_UID not in STAGED:
+        notify("No test case selected.", "error")
+        return
+    
+    data = STAGED[CURRENT_MODAL_UID]
+    story_id = data.get('story_id', '')
+    
+    if not story_id or story_id == 'MANUAL':
+        notify("No story linked to this test case.", "warn")
+        return
+    
+    btn = document.getElementById("btn-refetch-original")
+    btn.disabled = True
+    btn.innerText = "⏳ Fetching..."
+    
+    try:
+        pat = document.getElementById("ado_pat").value.strip()
+        auth = base64.b64encode(f":{pat}".encode("ascii")).decode("ascii")
+        headers = {"Authorization": f"Basic {auth}", "Content-Type": "application/json"}
+        base = document.getElementById("ado_url").value.strip().rstrip('/')
+        proj = document.getElementById("ado_project").value.strip()
+        
+        url = f"{base}/{proj}/_apis/wit/workItems/{story_id}?api-version=7.1"
+        log(f"Re-fetching original Story {story_id} from ADO...", "info")
+        
+        res = await pyfetch(url, method="GET", headers=headers)
+        
+        if not res.ok:
+            notify(f"Error {res.status} fetching story.", "error")
+            return
+        
+        story = await res.json()
+        
+        # Process story content with images
+        raw_desc = story['fields'].get('System.Description', '')
+        raw_ac = story['fields'].get('Microsoft.VSTS.Common.AcceptanceCriteria', '')
+        orig_desc = await inline_ado_images(raw_desc, base, auth)
+        orig_ac = await inline_ado_images(raw_ac, base, auth)
+        
+        # Store original in STAGED for future use
+        STAGED[CURRENT_MODAL_UID]['original_desc'] = orig_desc
+        STAGED[CURRENT_MODAL_UID]['original_ac'] = orig_ac
+        
+        # Set up toggle data
+        window.MODAL_STORY_DATA.original.desc = orig_desc
+        window.MODAL_STORY_DATA.original.ac = orig_ac
+        window.MODAL_STORY_DATA.hasOriginal = True
+        
+        # Show toggle and hide re-fetch button
+        document.getElementById("story-view-toggle").style.display = "flex"
+        document.getElementById("btn-view-generated").innerText = "📝 Used for TC"
+        document.getElementById("btn-view-original").innerText = "📋 Original (ADO)"
+        document.getElementById("btn-refetch-original").style.display = "none"
+        
+        # Switch to original view to show what was fetched
+        window.toggleStoryView('original')
+        
+        notify("Original story fetched!", "success")
+        log(f"Fetched original story {story_id} for comparison", "success")
+        
+    except Exception as e:
+        notify("Failed to fetch original story.", "error")
+        log(f"Re-fetch Error: {str(e)}", "error")
+    finally:
+        btn.disabled = False
+        btn.innerText = "🔄 Re-fetch from ADO"
+
+# --- INIT ---
+window.py_save_config = create_proxy(py_save_config)
+window.py_reset_instruction = create_proxy(py_reset_instruction)
+window.py_export_prompt_md = create_proxy(py_export_prompt_md)
+window.py_import_prompt_md = create_proxy(py_import_prompt_md)
+window.py_export_config_json = create_proxy(py_export_config_json)
+window.py_import_config_json = create_proxy(py_import_config_json)
+window.py_parse_manual_csv = create_proxy(py_parse_manual_csv)
+window.py_populate_modal = create_proxy(py_populate_modal)
+window.py_save_draft = create_proxy(py_save_draft)
+window.py_bulk_push = create_proxy(py_bulk_push)
+window.py_push_modal = create_proxy(py_push_modal)
+window.py_get_csv_content = create_proxy(py_get_csv_content)
+window.py_regenerate_tc = create_proxy(py_regenerate_tc)
+window.py_fetch_and_link_story = create_proxy(py_fetch_and_link_story)
+window.py_unlink_story = create_proxy(py_unlink_story)
+window.py_refetch_original_story = create_proxy(py_refetch_original_story)
+window.py_fetch_review = create_proxy(py_fetch_review)
+window.py_generate_from_review = create_proxy(py_generate_from_review)
+window.py_refine_story = create_proxy(py_refine_story)
+window.py_undo_refine = create_proxy(py_undo_refine)
+window.py_show_original_in_card = create_proxy(py_show_original_in_card)
+window.py_show_refined_in_card = create_proxy(py_show_refined_in_card)
+window.py_save_refined_edits = create_proxy(py_save_refined_edits)
+window.py_generate = create_proxy(py_generate)
+window.py_delete_items = create_proxy(py_delete_items)
+
+# Load saved settings from localStorage
+for k in KEYS: 
+    saved_val = localStorage.getItem(k)
+    if saved_val:
+        el = document.getElementById(k)
+        if el:
+            el.value = saved_val
+
+# Always set default instruction if not already set
+sys_instr_el = document.getElementById("sys_instruction")
+if sys_instr_el and not sys_instr_el.value.strip():
+    sys_instr_el.value = DEFAULT_INSTRUCTION
+
+# Initialize AI provider toggle based on saved value
+window.toggleAIProvider()
+</script>
+</body>
+</html>
